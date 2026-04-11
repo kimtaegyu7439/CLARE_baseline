@@ -31,8 +31,8 @@ This codebase is built on top of two open-source frameworks from Hugging Face:
 We provide pre-trained model checkpoints and LIBERO datasets on 🤗 Hugging Face: **[huggingface.co/continuallearning](https://huggingface.co/continuallearning)**
 
 Available resources:
-- **`dit_flow_mt_libero_90_pretrain`** and **`dit_mt_libero_90_pretrain`**: DiT-Dec and DiT-EncDec base checkpoints pretrained on LIBERO-90 as described in the paper
-- **`libero_10_image_task_0` to `libero_10_image_task_9`**: LIBERO-10 benchmark datasets
+- **`dit_flow_mt_libero_90_pretrain_new`**: Base VLA checkpoint pretrained on LIBERO-90 as described in the paper
+- **`libero_10_image_task_0` to `libero_10_image_task_9`**: LIBERO-10 benchmark datasets (Goal, Spatial, Object also available)
 
 ## Installation
 
@@ -70,7 +70,7 @@ Available resources:
 
 ## PEFT Configuration
 
-CLARE uses a custom PEFT adapter configuration. Below is an example configuration for the CLARE adapter for the DiT-Dec policy:
+CLARE uses a custom PEFT adapter configuration. Below is an example configuration for the CLARE adapter:
 
 ```json
 {
@@ -133,29 +133,30 @@ CLARE uses a custom PEFT adapter configuration. Below is an example configuratio
 
 ### Training with CLARE on LIBERO Benchmark
 
-The main training script is located at `lerobot_lsy/src/lerobot/scripts/clare.py`. Below is an example command for the first stage of continual learning on the LIBERO-10 benchmark:
+The main training script is located at `lerobot_lsy/src/lerobot/scripts/clare.py`. Below is an example command for the first stage of continual learning on LIBERO-10:
 
 ```bash
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --seed=42 \
     --job_name=clare_libero_10_task_0 \
-    --output_dir=./outputs/clare_libero_10_task_0 \
+    --output_dir=./outputs/libero_10/clare/dit_flow_mt_cl_seed_42_libero_10_task_0 \
     --dataset.repo_id=continuallearning/libero_10_image_task_0 \
-    --policy.path=continuallearning/dit_mt_libero_90_pretrain \
+    --policy.path=./outputs/dit_flow_mt_libero_90_pretrain_new \
     --policy.push_to_hub=false \
     --batch_size=32 \
     --num_workers=16 \
     --steps=20000 \
     --env.type=libero \
+    --env.benchmark=libero_10 \
     --env.task=Libero_10_Task_0 \
-    --eval.batch_size=20 \
+    --eval.batch_size=50 \
     --eval.n_episodes=100 \
-    --eval.max_episodes_rendered=100 \
+    --eval.max_episodes_rendered=4 \
     --eval_freq=200000 \
     --save_freq=20000 \
     --log_freq=100 \
-    --peft_cfg_path=./peft_lsy/config \
-    --expand_threshold=10.00 \
+    --peft_cfg_path=./peft_lsy/peft_config/clare_dit_flow_encoder_adapter \
+    --expand_threshold=1.0 \
     --detect_distribution_shift_steps=200 \
     --detect_distribution_shift_batch_size=32 \
     --detect_distribution_shift_num_workers=16 \
@@ -172,17 +173,29 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --wandb.entity=<your-wandb-entity>
 ```
 
-You can also run a full continual learning experiment for DiT-Dec using the provided bash script:
+To run a full continual learning experiment, use the provided bash scripts. Set your W&B entity first, then run:
+
 ```bash
-bash bash/dit_dec.sh
+# LIBERO-10 (10 tasks)
+bash bash/clare/dit_dec_libero_10.sh
+
+# LIBERO-Goal (10 tasks)
+bash bash/clare/dit_dec_libero_goal.sh
+
+# LIBERO-Spatial (10 tasks)
+bash bash/clare/dit_dec_libero_spatial.sh
+
+# LIBERO-40 (4 suites × 10 tasks)
+bash bash/clare/dit_dec_libero_40_10_goal_spatial_object.sh
 ```
+
+Each script runs the full task sequence sequentially, passing the previous stage's adapter checkpoint to the next stage.
 
 ### Key Training Arguments
 
 #### Dataset & Model
 - `--dataset.repo_id`: Hugging Face dataset repository ID
-- `--dataset.root`: Local path to the dataset
-- `--policy.path`: Path to the pre-trained VLA model
+- `--policy.path`: Path to the pre-trained VLA model (local path or HuggingFace repo ID)
 
 #### Training Configuration
 - `--batch_size`: Training batch size
@@ -197,8 +210,9 @@ bash bash/dit_dec.sh
 - `--train_discriminators_steps`: Training steps for the autoencoder-based routing mechanism
 
 #### Evaluation
-- `--env.type`: Environment type (e.g., libero, aloha)
-- `--env.task`: Specific task name
+- `--env.type`: Environment type (e.g., `libero`)
+- `--env.benchmark`: Benchmark suite (e.g., `libero_10`, `libero_goal`, `libero_spatial`)
+- `--env.task`: Comma-separated list of task names seen so far (e.g., `Libero_10_Task_0,Libero_10_Task_1`)
 - `--eval.n_episodes`: Number of evaluation episodes
 - `--eval_freq`: Frequency of evaluation (in training steps)
 
