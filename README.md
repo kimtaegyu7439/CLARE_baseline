@@ -2,9 +2,12 @@
 
 [Ralf Römer](https://ralfroemer.com)<sup>1,\*</sup>,
 [Yi Zhang](https://www.linkedin.com/in/yi-zhang-01a8aa245/)<sup>1,\*</sup>,
-[Angela P. Schoellig](https://www.dynsyslab.org/prof-angela-schoellig/)<sup>1</sup>,
+[Yuming Li](https://www.linkedin.com/in/yuming-li-6970792b1/)<sup>1,\*</sup>,
+[Angela P. Schoellig](https://www.dynsyslab.org/prof-angela-schoellig/)<sup>1,2,3</sup>,
 
 <sup>1</sup>Technical University of Munich
+<sup>2</sup>Munich Center for Machine Learning
+<sup>3</sup>Robotics Institute Germany
 
 [![arXiv](https://img.shields.io/badge/arXiv-2601.09512-red)](https://arxiv.org/abs/2601.09512)
 [![Website](https://img.shields.io/badge/Website-CLARE-blue)](https://tum-lsy.github.io/clare/)
@@ -248,8 +251,8 @@ If you find this work useful, please consider citing our paper:
 ```bibtex
 @article{clare,
   title={CLARE: Continual Learning for Vision-Language-Action Models via Autonomous Adapter Routing and Expansion},
-  author={Ralf R{\"o}mer and Yi Zhang and Angela P. Schoellig},
-  journal={arXiv preprint arXiv:2601.09512},
+  author={Ralf R{\"o}mer and Yi Zhang and Yuming Li and Angela P. Schoellig},
+  journal={IEEE Robotics and Automation Letters (RA-L)},
   year={2026}
 }
 ```
