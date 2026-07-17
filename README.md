@@ -2,7 +2,7 @@
 
 [Ralf Römer](https://ralfroemer.com)<sup>1,\*</sup>,
 [Yi Zhang](https://www.linkedin.com/in/yi-zhang-01a8aa245/)<sup>1,\*</sup>,
-[Yuming Li](https://www.linkedin.com/in/yuming-li-6970792b1/)<sup>1,\*</sup>,
+[Yuming Li](https://www.linkedin.com/in/yuming-li-6970792b1/)<sup>1</sup>,
 [Angela P. Schoellig](https://www.dynsyslab.org/prof-angela-schoellig/)<sup>1,2,3</sup>,
 
 <sup>1</sup>Technical University of Munich
