@@ -34,8 +34,28 @@ TRAIN_CONFIG_NAME = "train_config.json"
 
 @dataclass
 class TrainPipelineConfig(HubMixin):
+    """학습 실행 하나의 전체 설정. CLI 인자가 그대로 이 dataclass에 매핑된다.
+
+    draccus가 중첩 dataclass를 점 표기법으로 노출한다.
+        --batch_size=32              -> TrainPipelineConfig.batch_size
+        --dataset.repo_id=xxx        -> DatasetConfig.repo_id
+        --policy.path=xxx            -> 사전학습 체크포인트(아래 validate() 참조)
+        --env.type=libero            -> LiberoEnv 선택
+        --wandb.enable=true          -> WandBConfig.enable
+
+    본인 방법론용 인자를 추가하려면 이 클래스를 상속한 dataclass를 만들고 필드를
+    더하면 된다. scripts/clare.py의 PEFTTrainPipelineConfig가 그 예시다.
+
+        @dataclass
+        class MyTrainConfig(TrainPipelineConfig):
+            my_coef: float = 0.1     # --my_coef=0.3 으로 CLI에서 지정 가능
+
+    실행 시 이 설정 전체가 output_dir/checkpoints/*/train_config.json으로 저장되어
+    나중에 재현/재개할 수 있다.
+    """
+
     dataset: DatasetConfig
-    env: envs.EnvConfig | None = None
+    env: envs.EnvConfig | None = None      # None이면 롤아웃 평가를 하지 않는다
     policy: PreTrainedConfig | None = None
     # Set `dir` to where you would like to save all of the run outputs. If you run another training session
     # with the same value for `dir` its contents will be overwritten unless you set `resume` to true.
@@ -52,7 +72,9 @@ class TrainPipelineConfig(HubMixin):
     # Number of workers for the dataloader.
     num_workers: int = 4
     batch_size: int = 8
-    steps: int = 100_000
+    steps: int = 100_000        # epoch이 아니라 스텝 수로 학습 길이를 정한다
+    # 주의: eval_freq > 0이기만 하면 train.py가 시작 시 make_env를 호출한다.
+    # 평가가 실제로 발동하지 않더라도 gym_libero가 필요해진다. 학습만 하려면 0으로.
     eval_freq: int = 20_000
     log_freq: int = 200
     save_checkpoint: bool = True
@@ -69,12 +91,20 @@ class TrainPipelineConfig(HubMixin):
         self.checkpoint_path = None
 
     def validate(self):
+        """--policy.path / --resume 처리 후 출력 경로를 확정한다.
+
+        --policy.path를 주면 그 체크포인트의 config.json을 읽어 self.policy를 통째로
+        교체한다. 즉 아키텍처 하이퍼파라미터(hidden_dim, horizon 등)는 CLI가 아니라
+        체크포인트를 따라간다. 순차 파인튜닝에서 태스크마다 구조가 어긋나지 않는 이유다.
+        """
         # HACK: We parse again the cli args here to get the pretrained paths if there was some.
         policy_path = parser.get_path_arg("policy")
         if policy_path:
             # Only load the policy config
+            # 체크포인트의 config를 기본값으로 삼고, CLI로 준 --policy.xxx만 덮어쓴다.
             cli_overrides = parser.get_cli_overrides("policy")
             self.policy = PreTrainedConfig.from_pretrained(policy_path, cli_overrides=cli_overrides)
+            # 이 값이 make_policy에서 from_pretrained 호출 여부를 가른다.
             self.policy.pretrained_path = policy_path
         elif self.resume:
             # The entire train config is already loaded, we just need to get the checkpoint dir

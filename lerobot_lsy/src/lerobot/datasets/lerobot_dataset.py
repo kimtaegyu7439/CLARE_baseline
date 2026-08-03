@@ -489,6 +489,30 @@ class LeRobotDataset(torch.utils.data.Dataset):
         check_timestamps_sync(timestamps, episode_indices, ep_data_index_np, self.fps, self.tolerance_s)
 
         # Setup delta_indices
+        #
+        # self.delta_indices가 대입되는 유일한 지점이다(그 외에는 456행의 None 초기화뿐).
+        # 값의 출처를 끝까지 따라가면:
+        #
+        #   [1] policies/dit_flow_mt/configuration_dit_flow_mt.py
+        #         action_delta_indices  ->  [-1, 0, 1, ..., 14]        (스텝)
+        #   [2] datasets/factory.py  resolve_delta_timestamps()
+        #         [i / fps]             ->  [-0.05, 0.0, ..., 0.70]    (초)  = delta_timestamps
+        #   [3] LeRobotDataset(delta_timestamps=...)  생성자 인자로 전달
+        #   [4] 아래 줄
+        #         get_delta_indices()   ->  self.delta_indices
+        #   [5] datasets/utils.py:628
+        #         [round(d * fps)]      ->  [-1, 0, 1, ..., 14]        (다시 스텝)
+        #
+        # 초로 나눴다가 다시 곱하는 왕복이 낭비처럼 보이지만, delta_timestamps가
+        # LeRobotDataset의 공개 API이기 때문이다. 초 단위는 fps에 독립적이라 다른 fps의
+        # 데이터셋에도 같은 값을 쓸 수 있고, 그 사이에 check_delta_timestamps가 요청한
+        # 시각이 실제 프레임 시각과 맞는지 검증한다. round()는 0.05*20=1.0000000000000002
+        # 같은 부동소수 오차를 흡수한다.
+        #
+        # 결과 형태: {필드명: [정수 오프셋들]}
+        #   'observation.state' -> [-1, 0]          (len 2  -> 출력 (2, 8))
+        #   'action'            -> [-1, 0, ..., 14] (len 16 -> 출력 (16, 7))
+        # value의 길이가 곧 그 필드의 시간축 크기가 된다.
         if self.delta_timestamps is not None:
             check_delta_timestamps(self.delta_timestamps, self.fps, self.tolerance_s)
             self.delta_indices = get_delta_indices(self.delta_timestamps, self.fps)
@@ -641,13 +665,50 @@ class LeRobotDataset(torch.utils.data.Dataset):
             return get_hf_features_from_features(self.features)
 
     def _get_query_indices(self, idx: int, ep_idx: int) -> tuple[dict[str, list[int | bool]]]:
+        """"어느 행들을 읽을지"를 계산한다. 실제로 데이터를 읽지는 않는다.
+
+        입력
+            idx    : 데이터셋 전체 기준 행 번호 (0 ~ num_rows-1). 에피소드 번호가 아니다.
+            ep_idx : 그 행이 속한 에피소드 번호. __getitem__이 item["episode_index"]에서 꺼내 넘긴다.
+
+        출력 (튜플 2개)
+            query_indices : {키: [읽을 행 번호들]}   예) 'action' -> [89, 90, ..., 97, 97, 97]
+            padding       : {키+"_is_pad": BoolTensor} 어느 자리가 복제본인지 표시
+
+        왜 필요한가
+            반환 텐서 모양이 (16,7)로 고정이어야 DataLoader가 배치를 쌓을 수 있다. 그런데
+            에피소드 끝 근처에서는 idx+14 행이 존재하지 않는다. 그래서 없는 자리를 경계값
+            복제로 채우고, 어디가 가짜인지 마스크로 함께 알려준다.
+
+        예시 (에피소드0 = 행 0~97, idx=90, action delta=[-1..14])
+            요청  : 89 90 91 ... 97 | 98  99 100 101 102 103 104
+            결과  : 89 90 91 ... 97 | 97  97  97  97  97  97  97   <- 전부 97로 잘림
+            is_pad:  0  0  0 ...  0 |  1   1   1   1   1   1   1
+        """
+        # 이 에피소드가 차지하는 행 범위. to는 exclusive이므로 마지막 유효 행은 to-1이다.
         ep_start = self.episode_data_index["from"][ep_idx]
         ep_end = self.episode_data_index["to"][ep_idx]
+
+        # 중첩 컴프리헨션이라 변수 정의가 사용보다 아래 줄에 나온다. 풀어쓰면:
+        #     for key, delta_idx in self.delta_indices.items():   # delta_idx = [-1, 0, ..., 14]
+        #         for delta in delta_idx:                          # delta    = -1, 0, ...
+        #             max(ep_start, min(ep_end - 1, idx + delta))
+        #
+        # max(lo, min(hi, v))는 "v를 [lo, hi] 범위에 가두기"의 관용구다.
+        #     min(ep_end-1, ...) -> 에피소드 마지막 행보다 크면 끌어내림
+        #     max(ep_start, ...) -> 에피소드 첫 행보다 작으면 끌어올림
+        #
+        # 이 클램프가 결정적인 이유: 없으면 idx+delta가 이웃 에피소드의 행을 읽는다.
+        # 그 행은 표에 멀쩡히 존재하므로 에러도 나지 않고, 전혀 다른 장면의 데이터가
+        # 조용히 섞여 "팔이 순간이동하는" 물리적으로 불가능한 전이를 학습하게 된다.
         query_indices = {
             key: [max(ep_start.item(), min(ep_end.item() - 1, idx + delta)) for delta in delta_idx]
             for key, delta_idx in self.delta_indices.items()
         }
         padding = {  # Pad values outside of current episode range
+            # 클램프가 값을 바꿨는지를 기록한다. 조건이 위 클램프와 짝을 이룬다:
+            #     max(ep_start, ...) <-> < ep_start   (앞으로 벗어남)
+            #     min(ep_end-1, ...) <-> >= ep_end    (뒤로 벗어남, to가 exclusive라 >= )
             f"{key}_is_pad": torch.BoolTensor(
                 [(idx + delta < ep_start.item()) | (idx + delta >= ep_end.item()) for delta in delta_idx]
             )
@@ -660,6 +721,19 @@ class LeRobotDataset(torch.utils.data.Dataset):
         current_ts: float,
         query_indices: dict[str, list[int]] | None = None,
     ) -> dict[str, list[float]]:
+        """비디오(mp4) 키에 한해, 행 번호를 "몇 초 지점"으로 바꾼다.
+
+        입력
+            current_ts    : 현재 프레임의 timestamp(초)
+            query_indices : 있으면 그 행들의 timestamp를 읽고, 없으면 현재 시각 하나만 쓴다
+
+        출력
+            {비디오키: [디코딩할 시각(초) 목록]}
+
+        비디오는 행 번호로 접근할 수 없고 시각으로 seek해야 하므로 이 변환이 필요하다.
+        meta.video_keys를 순회하므로, 이미지 저장 데이터셋(=이 LIBERO)에서는 빈 dict를
+        반환하고 __getitem__의 비디오 분기 자체가 실행되지 않는다.
+        """
         query_timestamps = {}
         for key in self.meta.video_keys:
             if query_indices is not None and key in query_indices:
@@ -671,6 +745,32 @@ class LeRobotDataset(torch.utils.data.Dataset):
         return query_timestamps
 
     def _query_hf_dataset(self, query_indices: dict[str, list[int]]) -> dict:
+        """_get_query_indices가 계산한 행 번호로 실제 값을 읽어 시간축으로 쌓는다.
+
+        입력
+            query_indices : {키: [읽을 행 번호들]}   _get_query_indices의 첫 번째 반환값
+
+        출력
+            {키: 텐서}. 각 텐서의 첫 차원이 시간축이다.
+                'observation.state' -> (2, 8)
+                'action'            -> (16, 7)
+
+        이 함수가 시간축을 만드는 지점이다. hf_dataset은 5068행짜리 평평한 표일 뿐이고
+        시간 개념이 없다. 여기서 여러 행을 골라 stack해야 비로소 (2, 8) 같은 모양이 된다.
+
+        한 줄 해부:
+            self.hf_dataset.select(q_idx)   HF Dataset에서 해당 행들만 골라낸 부분집합
+                          [key]             그중 이 열만 -> 길이 N의 텐서 리스트
+            torch.stack(...)                리스트를 하나의 텐서로 -> (N, ...)
+
+        select()는 같은 행 번호가 여러 번 나와도 그대로 여러 번 반환한다. 에피소드 끝에서
+        [.., 97, 97, 97]처럼 클램프된 인덱스가 오면 97행 값이 그 횟수만큼 복제되는 이유다.
+
+        video_keys는 제외한다. mp4에 들어 있는 것은 행이 아니라 프레임이라 행 번호로 못 읽고,
+        __getitem__이 _get_query_timestamps + _query_videos로 따로 처리한다.
+        (이 LIBERO 데이터셋은 이미지를 개별 파일로 저장해 video_keys가 비어 있으므로
+         이 필터는 실질적으로 아무것도 걸러내지 않는다.)
+        """
         return {
             key: torch.stack(self.hf_dataset.select(q_idx)[key])
             for key, q_idx in query_indices.items()
@@ -700,17 +800,48 @@ class LeRobotDataset(torch.utils.data.Dataset):
         return self.num_frames
 
     def __getitem__(self, idx) -> dict:
+        """샘플 하나를 만든다. 여기서 "프레임 하나"가 "시간 창"으로 확장된다.
+
+        delta_timestamps(datasets/factory.py가 만든 것)를 받았으면, idx 한 점이 아니라
+        그 주변 프레임들을 함께 긁어와 시간축을 가진 텐서로 쌓는다. DiT-Flow + LIBERO에서는
+
+            observation.*  : idx-1, idx     -> (2, ...)
+            action         : idx-1 .. idx+14 -> (16, 7)
+
+        에피소드 경계를 넘어가는 요청은 가장 가까운 프레임을 복제해 채우고, 어느 자리가
+        가짜인지를 action_is_pad 같은 마스크로 함께 돌려준다.
+        (단 DiT-Flow는 do_mask_loss_for_padding=False라 그 마스크를 쓰지 않는다.)
+
+        헬퍼 3개의 역할 분담:
+            _get_query_indices  "어느 행을 읽을지" 계산 (읽지는 않음) + 패딩 마스크
+            _query_hf_dataset   그 행들을 실제로 읽어 시간축으로 stack
+            _get_query_timestamps / _query_videos
+                                mp4 저장 데이터셋 전용. 행 번호 대신 시각으로 seek.
+                                이 LIBERO 데이터셋은 이미지 저장이라 실행되지 않는다.
+        """
+        # hf_dataset은 (전체 프레임 수 x 열) 짜리 평평한 표다. 시간 개념이 없다.
+        # 여기서 꺼낸 item은 아직 시간축이 없는 단일 프레임이다.
         item = self.hf_dataset[idx]
+        # 이 행이 몇 번 에피소드인지. 아래 클램프가 에피소드 경계를 알아야 하므로 필요하다.
         ep_idx = item["episode_index"].item()
 
         query_indices = None
         if self.delta_indices is not None:
+            # [1] 어느 행들을 읽을지 계산. 에피소드 밖으로 나가면 경계값으로 클램프하고
+            #     그 사실을 padding(..._is_pad)에 기록한다. 아직 데이터를 읽지는 않는다.
+            #     query_indices 예: {'action': [89, 90, ..., 97, 97, 97], ...}
+            #     padding      예: {'action_is_pad': [0,...,0,1,1,1], ...}
             query_indices, padding = self._get_query_indices(idx, ep_idx)
+            # [2] 그 행들을 실제로 읽어 시간축으로 stack. 여기서 (2,8), (16,7)이 만들어진다.
             query_result = self._query_hf_dataset(query_indices)
+            # [3] 패딩 마스크를 item에 합치고,
             item = {**item, **padding}
+            # [4] 단일 프레임 값들을 시간축 있는 버전으로 덮어쓴다.
             for key, val in query_result.items():
                 item[key] = val
 
+        # 이미지가 mp4로 저장된 데이터셋이면 해당 시각의 프레임을 디코딩한다.
+        # (이 LIBERO 데이터셋은 이미지로 저장돼 있어 이 분기를 타지 않는다.)
         if len(self.meta.video_keys) > 0:
             current_ts = item["timestamp"].item()
             query_timestamps = self._get_query_timestamps(current_ts, query_indices)
@@ -723,6 +854,9 @@ class LeRobotDataset(torch.utils.data.Dataset):
                 item[cam] = self.image_transforms(item[cam])
 
         # Add task as a string
+        # 정수 task_index를 자연어 문장으로 바꾼다. 이 문자열이 그대로 배치의 "task" 키가
+        # 되어 CLIP 인코더로 들어간다. 예: "pick up the black bowl ... and place it on the plate"
+        # 텐서가 아니므로 train.py의 .to(device) 루프에서 건너뛰어진다.
         task_idx = item["task_index"].item()
         item["task"] = self.meta.tasks[task_idx]
 

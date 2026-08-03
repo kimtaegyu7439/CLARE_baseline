@@ -183,10 +183,18 @@ def rollout(
         if render_callback is not None:
             render_callback(env)
 
-        # VectorEnv stores is_success in `info["final_info"][env_index]["is_success"]`. "final_info" isn't
-        # available of none of the envs finished.
+        # gymnasium < 1.0: VectorEnv stores is_success in `info["final_info"][env_index]["is_success"]`,
+        #   and "final_info" is absent if no env finished this step.
+        # gymnasium >= 1.0: "final_info" was removed. With NEXT_STEP autoreset the terminating step
+        #   returns its own info directly, batched as info["is_success"] (values) plus
+        #   info["_is_success"] (bool mask of which envs actually reported it).
+        # 아래 elif가 없으면 gymnasium 1.x에서 successes가 항상 전부 False가 되어,
+        # 보상은 제대로 쌓이는데 pc_success만 0으로 나오는 형태로 조용히 실패한다.
         if "final_info" in info:
-            successes = [info["is_success"] if info is not None else False for info in info["final_info"]]
+            successes = [i["is_success"] if i is not None else False for i in info["final_info"]]
+        elif "is_success" in info:
+            valid = info.get("_is_success", np.ones(env.num_envs, dtype=bool))
+            successes = [bool(s) and bool(m) for s, m in zip(info["is_success"], valid, strict=False)]
         else:
             successes = [False] * env.num_envs
 
@@ -251,6 +259,21 @@ def eval_policy(
             seed is incremented by 1. If not provided, the environments are not manually seeded.
     Returns:
         Dictionary with metrics and data regarding the rollouts.
+
+    학습 손실과 달리 이쪽이 실제로 보고되는 성능 지표다. 시뮬레이터에서 정책을 직접
+    굴려 과제를 성공했는지 센다. 핵심 지표는 pc_success(성공률 %)다.
+
+    한 에피소드의 흐름:
+        env.reset() -> policy.reset()으로 큐 비우기 -> 매 스텝 policy.select_action()
+        -> env.step() -> 성공하거나 max_episode_steps(500스텝=25초)에 도달하면 종료
+
+    select_action은 8스텝에 한 번만 실제 추론을 하고 나머지는 큐에서 꺼내므로
+    (modeling_dit_flow_mt.py 참조), 실제 신경망 호출은 스텝 수의 1/8이다.
+    그래도 num_inference_steps=100번 적분해야 하므로 평가는 학습보다 느릴 수 있다.
+
+    비용에 주의: n_episodes=100, 최대 500스텝이면 에피소드당 최대 25초짜리 롤아웃을
+    100번 돌린다. CLARE 스크립트가 continual learning 단계마다 지금까지 배운 모든
+    태스크를 평가하므로, 태스크가 늘수록 평가 비용이 선형으로 증가한다.
     """
     if max_episodes_rendered > 0 and not videos_dir:
         raise ValueError("If max_episodes_rendered > 0, videos_dir must be provided.")

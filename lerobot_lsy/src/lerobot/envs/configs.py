@@ -83,34 +83,52 @@ class AlohaEnv(EnvConfig):
 @EnvConfig.register_subclass("libero")
 @dataclass
 class LiberoEnv(EnvConfig):
-    benchmark: str = "libero_10"
-    task: str = "Libero_10_Task_0"
+    """LIBERO 시뮬레이션 환경 설정. --env.type=libero 로 선택된다.
+
+    학습에는 쓰이지 않고 롤아웃 평가에만 쓰인다. gym_libero 패키지가 설치돼 있어야
+    make_env()가 동작한다(envs/factory.py). 학습만 할 거면 --eval_freq=0으로 두면
+    make_env 자체가 호출되지 않아 이 의존성을 피할 수 있다.
+
+    여기 features/features_map은 "gym이 내놓는 관측"을 "정책이 기대하는 키"로
+    번역하는 표다. 데이터셋(LeRobotDataset)이 이미 정책 키를 쓰는 것과 달리,
+    gym 환경은 자기 나름의 이름(agent_pos, pixels/...)을 쓰기 때문에 필요하다.
+    """
+
+    benchmark: str = "libero_10"          # 과제 묶음: libero_10 / libero_goal / libero_spatial / libero_object
+    task: str = "Libero_10_Task_0"        # 평가할 과제. 쉼표로 여러 개 지정하면 순차 평가된다.
     task_id: str = "task_0"
-    fps: int = 20
-    episode_length: int = 500
+    fps: int = 20                         # 데이터셋 fps와 같아야 한다. 1스텝 = 0.05초.
+    episode_length: int = 500             # 최대 500스텝 = 25초 안에 성공해야 함
     features: dict[str, PolicyFeature] = field(
         default_factory=lambda: {
             "action": PolicyFeature(type=FeatureType.ACTION, shape=(7,)),
         }
     )
+    # gym 관측 키 -> 정책 키 변환표.
+    # joint_state가 주석 처리된 것에 주목: 데이터셋에는 observation.state.joint(7차원)가
+    # 들어 있지만 DiT-Flow는 쓰지 않으므로 환경 쪽에서도 아예 넘기지 않는다.
     features_map: dict[str, str] = field(
         default_factory=lambda: {
             "action": ACTION,
-            "agent_pos": OBS_ROBOT,
-            # "joint_state": f"{OBS_ROBOT}.joint",
-            "pixels/image": f"{OBS_IMAGES}.image",
-            "pixels/wrist_image": f"{OBS_IMAGES}.wrist_image",
+            "agent_pos": OBS_ROBOT,                          # -> observation.state (8차원)
+            # "joint_state": f"{OBS_ROBOT}.joint",           # 의도적으로 비활성화됨
+            "pixels/image": f"{OBS_IMAGES}.image",           # 3인칭 카메라
+            "pixels/wrist_image": f"{OBS_IMAGES}.wrist_image",  # 손목 카메라
         }
     )
 
     def __post_init__(self):
+        # dataclass field에서 선언하지 않고 여기서 채우는 이유는 features가 default_factory로
+        # 만들어진 뒤에 항목을 덧붙여야 하기 때문. shape은 단일 프레임 기준이다.
         self.features["agent_pos"] = PolicyFeature(type=FeatureType.STATE, shape=(8,))
         # self.features["joint_state"] = PolicyFeature(type=FeatureType.STATE, shape=(7,))
+        # 주의: 여기는 (H,W,C)이지만 정책에 들어갈 때는 (C,H,W)로 바뀐다.
         self.features["pixels/image"] = PolicyFeature(type=FeatureType.VISUAL, shape=(256, 256, 3))
         self.features["pixels/wrist_image"] = PolicyFeature(type=FeatureType.VISUAL, shape=(256, 256, 3))
 
     @property
     def gym_kwargs(self) -> dict:
+        """gym.make(handle, **gym_kwargs)로 넘어가는 인자."""
         return {
             "benchmark": self.benchmark,
             "max_episode_steps": self.episode_length,

@@ -34,8 +34,14 @@ This codebase is built on top of two open-source frameworks from Hugging Face:
 We provide pre-trained model checkpoints and LIBERO datasets on 🤗 Hugging Face: **[huggingface.co/continuallearning](https://huggingface.co/continuallearning)**
 
 Available resources:
-- **`dit_flow_mt_libero_90_pretrain_new`**: Base VLA checkpoint pretrained on LIBERO-90 as described in the paper
+- **`dit_flow_mt_libero_90_pretrain`**: Base VLA checkpoint pretrained on LIBERO-90 as described in the paper
 - **`libero_10_image_task_0` to `libero_10_image_task_9`**: LIBERO-10 benchmark datasets (Goal, Spatial, Object also available)
+
+> Earlier revisions of this README pointed at `dit_flow_mt_libero_90_pretrain_new`, which is
+> not publicly readable (Hugging Face answers `401` for it). Use
+> `dit_flow_mt_libero_90_pretrain` — same `ditflow_mt` policy type, pretrained on LIBERO-90.
+> If you have been granted access to the private repo, run `hf auth login` and set
+> `PRETRAIN_REPO` in [`bash/clare/env.sh`](bash/clare/env.sh).
 
 ## Installation
 
@@ -70,6 +76,38 @@ Available resources:
    ```bash
    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
    ```
+
+5. **Configure where datasets and models are stored**
+
+   All download locations live in [`bash/clare/env.sh`](bash/clare/env.sh), which every
+   training script sources. Edit the two roots at the top of that file:
+
+   ```bash
+   export CLARE_DATA_ROOT=/home/sa090180/Datasets   # LIBERO datasets
+   export CLARE_MODEL_ROOT=/home/sa090180/Models    # checkpoints + HF backbones
+   ```
+
+   These drive the variables the underlying libraries actually read:
+
+   | Variable | Default | What lands there |
+   | --- | --- | --- |
+   | `HF_LEROBOT_HOME` | `$CLARE_DATA_ROOT/lerobot` | LIBERO task datasets, under `<repo_id>/` |
+   | `HF_HUB_CACHE` | `$CLARE_MODEL_ROOT/hf_hub` | CLIP text encoder + ViT backbone pulled by `from_pretrained()` |
+   | `TORCH_HOME` | `$CLARE_MODEL_ROOT/torch` | torch.hub weights |
+   | `PRETRAIN_REPO` | `continuallearning/dit_flow_mt_libero_90_pretrain` | Which checkpoint to download |
+   | `PRETRAIN_PATH` | `$CLARE_MODEL_ROOT/dit_flow_mt_libero_90_pretrain` | Pretrained VLA checkpoint (`--policy.path`) |
+   | `CHECKPOINT_ROOT` | `./outputs` | Training outputs |
+
+   Any of them can also be overridden per-run: `HF_LEROBOT_HOME=/other/path bash bash/clare/clare_libero_spatial.sh`.
+
+6. **Download the checkpoint and datasets**
+
+   ```bash
+   bash bash/clare/download_assets.sh libero_spatial      # or libero_10 / libero_goal / libero_object
+   ```
+
+   Training also downloads anything missing on first run, so this step is optional —
+   it just lets you fetch everything up front.
 
 ## PEFT Configuration
 
@@ -139,12 +177,14 @@ CLARE uses a custom PEFT adapter configuration. Below is an example configuratio
 The main training script is located at `lerobot_lsy/src/lerobot/scripts/clare.py`. Below is an example command for the first stage of continual learning on LIBERO-10:
 
 ```bash
+source bash/clare/env.sh   # sets HF_LEROBOT_HOME, HF_HUB_CACHE, PRETRAIN_PATH
+
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --seed=42 \
     --job_name=clare_libero_10_task_0 \
     --output_dir=./outputs/libero_10/clare/dit_flow_mt_cl_seed_42_libero_10_task_0 \
     --dataset.repo_id=continuallearning/libero_10_image_task_0 \
-    --policy.path=./outputs/dit_flow_mt_libero_90_pretrain_new \
+    --policy.path=${PRETRAIN_PATH} \
     --policy.push_to_hub=false \
     --batch_size=32 \
     --num_workers=16 \
@@ -180,16 +220,16 @@ To run a full continual learning experiment, use the provided bash scripts. Set 
 
 ```bash
 # LIBERO-10 (10 tasks)
-bash bash/clare/dit_dec_libero_10.sh
+bash bash/clare/clare_libero_10.sh
 
 # LIBERO-Goal (10 tasks)
-bash bash/clare/dit_dec_libero_goal.sh
+bash bash/clare/clare_libero_goal.sh
 
 # LIBERO-Spatial (10 tasks)
-bash bash/clare/dit_dec_libero_spatial.sh
+bash bash/clare/clare_libero_spatial.sh
 
 # LIBERO-40 (4 suites × 10 tasks)
-bash bash/clare/dit_dec_libero_40_10_goal_spatial_object.sh
+bash bash/clare/clare_libero_40_10_goal_spatial_object.sh
 ```
 
 Each script runs the full task sequence sequentially, passing the previous stage's adapter checkpoint to the next stage.
@@ -223,15 +263,6 @@ Each script runs the full task sequence sequentially, passing the previous stage
 - `--wandb.enable`: Enable Weights & Biases logging
 - `--wandb.project`: W&B project name
 - `--log_freq`: Logging frequency
-
-<!-- ## Environment Variables
-
-Set the following environment variables before running experiments:
-
-```bash
-export DATASET_ROOT=/path/to/your/datasets
-export POLICY_ROOT=/path/to/your/pretrained/policy
-``` -->
 
 ## Evaluation
 

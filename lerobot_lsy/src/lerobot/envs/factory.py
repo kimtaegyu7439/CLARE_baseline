@@ -54,17 +54,25 @@ def make_env(cfg: EnvConfig, n_envs: int = 1, use_async_envs: bool = False) -> g
     if n_envs < 1:
         raise ValueError("`n_envs must be at least 1")
 
+    # cfg.type="libero" -> "gym_libero" 패키지를 import한다. 이 import는 부작용이 목적이다:
+    # 패키지가 로드되면서 gym 레지스트리에 "gym_libero/Libero_..." 핸들들이 등록된다.
     package_name = f"gym_{cfg.type}"
 
     try:
         importlib.import_module(package_name)
     except ModuleNotFoundError as e:
+        # gym-libero는 lerobot 의존성에 포함돼 있지 않아 별도 설치가 필요하다.
+        #   git clone git@github.com:ZhangYi1999/gym-libero.git && cd gym-libero && pip install -e .
+        # 학습만 할 거면 --eval_freq=0으로 두어 이 함수 호출 자체를 피할 수 있다.
         print(f"{package_name} is not installed. Please install it with `pip install 'lerobot[{cfg.type}]'`")
         raise e
 
+    # 예: "gym_libero/Libero_Spatial_Task_0"
     gym_handle = f"{package_name}/{cfg.task}"
 
     # batched version of the env that returns an observation of shape (b, c)
+    # n_envs개를 동시에 굴려 에피소드를 병렬 평가한다(--eval.batch_size).
+    # Sync는 한 프로세스에서 순차 실행, Async는 프로세스를 분리해 병렬 실행.
     env_cls = gym.vector.AsyncVectorEnv if use_async_envs else gym.vector.SyncVectorEnv
     env = env_cls(
         [lambda: gym.make(gym_handle, disable_env_checker=True, **cfg.gym_kwargs) for _ in range(n_envs)]

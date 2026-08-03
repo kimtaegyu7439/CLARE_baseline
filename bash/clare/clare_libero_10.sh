@@ -2,10 +2,12 @@ export MUJOCO_GL=egl;
 export CUDA_VISIBLE_DEVICES=0;
 export MUJOCO_EGL_DEVICE_ID=0;
 SEED=${1:-42};
-PRETRAIN_PATH=${PRETRAIN_PATH:-./outputs/dit_flow_mt_libero_90_pretrain_new};
 
-DATASET_ROOT=continuallearning;
-CHECKPOINT_ROOT=./outputs;
+# Sets HF_LEROBOT_HOME (dataset download dir), HF_HUB_CACHE (model download dir)
+# and PRETRAIN_PATH. Edit bash/clare/env.sh to change those locations.
+source "$(dirname "${BASH_SOURCE[0]}")/env.sh";
+
+HF_ORG=continuallearning;
 
 STEPS=20000;
 LOG_STEPS=100;
@@ -46,7 +48,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
     --wandb.project=clare_experiments \
-    --wandb.entity=<YOUR_WANDB_ENTITY> \
+    ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --seed=$SEED \
@@ -82,7 +84,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
     --wandb.project=clare_experiments \
-    --wandb.entity=<YOUR_WANDB_ENTITY> \
+    ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --seed=$SEED \
@@ -118,7 +120,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
     --wandb.project=clare_experiments \
-    --wandb.entity=<YOUR_WANDB_ENTITY> \
+    ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --seed=$SEED \
@@ -154,7 +156,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
     --wandb.project=clare_experiments \
-    --wandb.entity=<YOUR_WANDB_ENTITY> \
+    ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --seed=$SEED \
@@ -190,7 +192,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
     --wandb.project=clare_experiments \
-    --wandb.entity=<YOUR_WANDB_ENTITY> \
+    ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --seed=$SEED \
@@ -226,7 +228,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
     --wandb.project=clare_experiments \
-    --wandb.entity=<YOUR_WANDB_ENTITY> \
+    ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --seed=$SEED \
@@ -262,7 +264,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
     --wandb.project=clare_experiments \
-    --wandb.entity=<YOUR_WANDB_ENTITY> \
+    ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --seed=$SEED \
@@ -298,7 +300,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
     --wandb.project=clare_experiments \
-    --wandb.entity=<YOUR_WANDB_ENTITY> \
+    ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --seed=$SEED \
@@ -334,7 +336,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
     --wandb.project=clare_experiments \
-    --wandb.entity=<YOUR_WANDB_ENTITY> \
+    ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --seed=$SEED \
@@ -370,4 +372,4 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
     --wandb.project=clare_experiments \
-    --wandb.entity=<YOUR_WANDB_ENTITY>;
+    ${WANDB_ENTITY_ARG};

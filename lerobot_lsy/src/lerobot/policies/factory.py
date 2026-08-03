@@ -199,7 +199,19 @@ def make_policy(
 
     Returns:
         PreTrainedPolicy: _description_
+
+    핵심 포인트 두 가지.
+
+    1) 정책의 input_features / output_features는 config에 하드코딩된 게 아니라
+       여기서 데이터셋(또는 환경)으로부터 채워진다(234-235행). 그래서 같은 정책
+       클래스가 데이터셋만 바꿔도 다른 차원으로 만들어진다.
+
+    2) cfg.pretrained_path(= CLI의 --policy.path)가 있으면 from_pretrained로
+       체크포인트를 불러오고, 없으면 새로 만든다(238-245행). 즉 순차 파인튜닝
+       (이전 태스크 체크포인트를 다음 태스크의 시작점으로) 이 코드 수정 없이 된다.
+       CLARE 없는 continual learning 베이스라인을 만들 때 이 점이 중요하다.
     """
+    # 둘 중 정확히 하나만 있어야 한다. 학습 시에는 ds_meta, 환경만으로 평가할 때는 env_cfg.
     if bool(ds_meta) == bool(env_cfg):
         raise ValueError("Either one of a dataset metadata or a sim env must be provided.")
 
@@ -216,11 +228,15 @@ def make_policy(
             "Please use `cpu` or `cuda` backend."
         )
 
+    # cfg.type 문자열("ditflow_mt") -> 정책 클래스(DiTFlowMTPolicy) 조회.
     policy_cls = get_policy_class(cfg.type)
 
     kwargs = {}
     if ds_meta is not None:
+        # 데이터셋 메타 -> PolicyFeature 변환. (H,W,C)를 (C,H,W)로 바꾸는 것도 여기서 한다.
         features = dataset_to_policy_features(ds_meta.features)
+        # 정규화 통계. datasets/factory.py에서 이미지 항목이 ImageNet 값으로
+        # 덮어씌워진 뒤의 stats가 여기로 들어와 Normalize 레이어의 버퍼가 된다.
         kwargs["dataset_stats"] = ds_meta.stats
     else:
         if not cfg.pretrained_path:
@@ -231,6 +247,9 @@ def make_policy(
             )
         features = env_to_policy_features(env_cfg)
 
+    # ACTION 타입은 출력, 나머지는 전부 입력으로 분류한다.
+    # 주의: 여기서 input_features에는 observation.state.joint도 포함된다. 실제 사용
+    # 여부는 각 정책이 PreTrainedConfig.robot_state_feature 등으로 다시 골라 정한다.
     cfg.output_features = {key: ft for key, ft in features.items() if ft.type is FeatureType.ACTION}
     cfg.input_features = {key: ft for key, ft in features.items() if key not in cfg.output_features}
     kwargs["config"] = cfg
@@ -238,10 +257,12 @@ def make_policy(
     if cfg.pretrained_path:
         # Load a pretrained policy and override the config if needed (for example, if there are inference-time
         # hyperparameters that we want to vary).
+        # --policy.path로 넘긴 경로(로컬 디렉토리 또는 HF repo id). 순차 파인튜닝의 연결고리.
         kwargs["pretrained_name_or_path"] = cfg.pretrained_path
         policy = policy_cls.from_pretrained(**kwargs)
     else:
         # Make a fresh policy.
+        # --policy.type만 준 경우(사전학습 pretrain.sh 경로).
         policy = policy_cls(**kwargs)
 
     policy.to(cfg.device)

@@ -1,8 +1,12 @@
 export CUDA_VISIBLE_DEVICES=0;
 SEED=${1:-1000};
 
-DATASET_REPO_ID=${<YOUR_DATASET_REPO_ID>};
-DATASET_ROOT=${<YOUR_DATASET_ROOT>};
+# Sets HF_LEROBOT_HOME (dataset download dir) and HF_HUB_CACHE (model download dir).
+source "$(dirname "${BASH_SOURCE[0]}")/env.sh";
+
+DATASET_REPO_ID=${DATASET_REPO_ID:-continuallearning/libero_90_image};
+# Leave empty to let LeRobot resolve it to $HF_LEROBOT_HOME/$DATASET_REPO_ID.
+DATASET_ROOT=${DATASET_ROOT:-${HF_LEROBOT_HOME}/${DATASET_REPO_ID}};
 
 STEPS=200000;
 LOG_STEPS=500;
@@ -26,4 +30,4 @@ python ./lerobot_lsy/src/lerobot/scripts/train.py \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
     --wandb.project=clare_experiments \
-    --wandb.entity=<YOUR_WANDB_ENTITY>;
+    ${WANDB_ENTITY_ARG};

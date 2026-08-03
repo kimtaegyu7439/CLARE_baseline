@@ -105,8 +105,11 @@ def env_to_policy_features(env_cfg: EnvConfig) -> dict[str, PolicyFeature]:
 
 
 def are_all_envs_same_type(env: gym.vector.VectorEnv) -> bool:
-    first_type = type(env.envs[0])  # Get type of first env
-    return all(type(e) is first_type for e in env.envs)  # Fast type check
+    # 래퍼가 아니라 실제 환경의 타입을 비교해야 한다. env.envs[i]는 전부 TimeLimit 등으로
+    # 똑같이 감싸여 있어서, 안의 환경이 서로 달라도 래퍼 타입은 항상 같게 나온다.
+    # (그러면 아래 check_env_attributes_and_types의 경고가 영영 안 뜬다.)
+    first_type = type(env.envs[0].unwrapped)
+    return all(type(e.unwrapped) is first_type for e in env.envs)
 
 
 def check_env_attributes_and_types(env: gym.vector.VectorEnv) -> None:
@@ -128,10 +131,20 @@ def check_env_attributes_and_types(env: gym.vector.VectorEnv) -> None:
 
 
 def add_envs_task(env: gym.vector.VectorEnv, observation: dict[str, Any]) -> dict[str, Any]:
-    """Adds task feature to the observation dict with respect to the first environment attribute."""
-    if hasattr(env.envs[0], "task_description"):
+    """Adds task feature to the observation dict with respect to the first environment attribute.
+
+    반드시 .unwrapped에서 속성을 확인해야 한다. env.envs[0]는 TimeLimit 같은 래퍼이고,
+    gymnasium 1.0부터 Wrapper.__getattr__(속성 전달)이 제거되어 래퍼에서는 hasattr가
+    항상 False가 된다. 그러면 아래 else로 빠져 언어 지시문이 빈 문자열이 되고,
+    언어 조건 정책(예: DiT-Flow-MT의 CLIP 인코더)은 조건 없이 롤아웃하게 되어
+    손실은 멀쩡한데 성공률만 0이 되는 형태로 조용히 실패한다.
+    바로 위 check_env_attributes_and_types()가 .unwrapped를 쓰므로 경고도 뜨지 않는다.
+    (env.call()은 래퍼를 통과하므로 게이트만 고치면 된다.)
+    """
+    first_env = env.envs[0].unwrapped
+    if hasattr(first_env, "task_description"):
         observation["task"] = env.call("task_description")
-    elif hasattr(env.envs[0], "task"):
+    elif hasattr(first_env, "task"):
         observation["task"] = env.call("task")
     else:  #  For envs without language instructions, e.g. aloha transfer cube and etc.
         num_envs = observation[list(observation.keys())[0]].shape[0]

@@ -218,10 +218,15 @@ def rollout(
         if render_callback is not None:
             render_callback(env)
 
-        # VectorEnv stores is_success in `info["final_info"][env_index]["is_success"]`. "final_info" isn't
-        # available of none of the envs finished.
+        # gymnasium >= 1.0은 "final_info"를 없애고, NEXT_STEP autoreset에서 종료 스텝의 info를
+        # info["is_success"](값) + info["_is_success"](보고 여부 마스크)로 배치해 돌려준다.
+        # 이 elif가 없으면 successes가 항상 전부 False가 되어 pc_success만 0으로 나온다.
+        # (scripts/eval.py의 rollout과 동일하게 유지할 것)
         if "final_info" in info:
-            successes = [info["is_success"] if info is not None else False for info in info["final_info"]]
+            successes = [i["is_success"] if i is not None else False for i in info["final_info"]]
+        elif "is_success" in info:
+            valid = info.get("_is_success", np.ones(env.num_envs, dtype=bool))
+            successes = [bool(s) and bool(m) for s, m in zip(info["is_success"], valid, strict=False)]
         else:
             successes = [False] * env.num_envs
 
