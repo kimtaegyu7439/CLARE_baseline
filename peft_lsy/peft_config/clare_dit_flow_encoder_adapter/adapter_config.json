@@ -36,6 +36,6 @@
     "hidden_dim": 1024,
     "lora_rank": 32,
     "lora_alpha": 32,
-    "use_lora": false
+    "use_lora": true
   }
 }

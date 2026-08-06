@@ -145,6 +145,8 @@ class CLARELayer(nn.Module, BaseTunerLayer):
                                 "lora_a" : nn.Linear(lora_wrapped_module.in_features, lora_wrapped_module.rank, bias=False),
                                 "lora_b" : nn.Linear(lora_wrapped_module.rank, lora_wrapped_module.out_features, bias=False)
                             })
+                            nn.init.zeros_(lora_func_adapter_template.layer_wise_lora_adapters[name.replace(".", "_")]["lora_b"].weight)
+
                     elif isinstance(module, nn.MultiheadAttention):
                         # Replace the original base layer with lora compatiable layer
                         lora_wrapped_module = LoRAMultiheadAttention(module, self.module_config.func_adapter_cfg)
@@ -158,6 +160,7 @@ class CLARELayer(nn.Module, BaseTunerLayer):
                                 "lora_a" : nn.Linear(lora_wrapped_module.original_layer.out_proj.in_features, lora_wrapped_module.original_layer.out_proj.rank, bias=False),
                                 "lora_b" : nn.Linear(lora_wrapped_module.original_layer.out_proj.rank, lora_wrapped_module.original_layer.out_proj.out_features, bias=False)
                             })
+                            nn.init.zeros_(lora_func_adapter_template.layer_wise_lora_adapters[name.replace(".", "_")]["lora_b"].weight)
                             lora_func_adapter_template.layer_wise_lora_parameters[name.replace(".", "_")] = nn.ParameterDict({
                                 "lora_a" : nn.Linear(lora_wrapped_module.in_features, lora_wrapped_module.rank, bias=False),
                                 "lora_b" : nn.Linear(lora_wrapped_module.rank, lora_wrapped_module.out_features, bias=False)
@@ -357,6 +360,7 @@ class CLARELayer(nn.Module, BaseTunerLayer):
                         "lora_a" : nn.Linear(in_features, rank, bias=False),
                         "lora_b" : nn.Linear(rank, out_features, bias=False)
                     })
+                    nn.init.zeros_(new_adapter.layer_wise_lora_adapters[sub_module_name.replace(".", "_")]["lora_b"].weight)
                 elif isinstance(sub_module, LoRAMultiheadAttention):
                     new_adapter.layer_wise_lora_adapters[sub_module_name.replace(".", "_")] = nn.ModuleDict({
                         "lora_a" : nn.Linear(sub_module.original_layer.out_proj.in_features, sub_module.original_layer.out_proj.rank, bias=False),

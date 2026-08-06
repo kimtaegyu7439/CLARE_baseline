@@ -86,9 +86,32 @@ class E0Config(TrainPipelineConfig):
     holdout_episodes: int = 5              # 태스크당 뒤 N 에피소드는 학습에서 제외
     probe_batches: int = 16
     probe_batch_size: int = 16
+    # ★ 프로브 전용 시드. flow matching 손실은 매 호출 ε와 t를 새로 뽑고 샘플러도
+    #   셔플하므로, 시드를 안 박으면 "프로브 직전까지 소비한 난수량"이 값에 섞인다.
+    #   실제로 λ=10/100/1000은 Fisher 추정(100 batch)으로 RNG를 전진시키고 λ=0/inf는
+    #   안 해서, 학습 결과가 bit 단위로 같은 stage 0에서도 MSE가 0.0094 갈렸다.
+    #   여기서 고정하면 모든 팔·모든 스테이지가 같은 문제지를 풀게 되어 짝지은 비교가 된다.
+    probe_seed: int = 12345
     probe_sr: bool = True
     probe_n_episodes: int = 20
     probe_eval_batch_size: int = 20
+
+    # 학습/Fisher를 건너뛰고 --policy.path의 체크포인트를 프로브만 다시 잰다.
+    # 프로브 코드가 바뀌었을 때 재학습 없이 결과를 다시 받는 용도.
+    reprobe: bool = False
+
+    def validate(self):
+        """reprobe는 기존 체크포인트를 읽기만 하므로 output_dir 존재 검사를 우회한다.
+
+        학습 경로에서는 그 검사가 산출물 덮어쓰기를 막는 안전장치이므로 그대로 둔다.
+        """
+        out = self.output_dir
+        if self.reprobe and isinstance(out, Path) and out.is_dir():
+            self.output_dir = None
+            super().validate()
+            self.output_dir = out
+        else:
+            super().validate()
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -135,10 +158,21 @@ def build_ewc_state(cfg: E0Config, policy, dataset, train_eps, device, prev: dic
     policy.zero_grad(set_to_none=True)
     policy.train()
 
+    # ★ 누적 전에 이번 F_k를 먼저 mean=1로 맞춘다.
+    #   prev는 이미 mean=1로 정규화돼 저장돼 있는데 갓 잰 F_k는 raw다(평균 ~8e-7).
+    #   그대로 더하면 prev가 100만 배 커서 F_k가 통째로 묻히고, 태스크 0 이후
+    #   Fisher가 영영 갱신되지 않는다(실측: stage0 대비 stage2의 상대차 2.4e-6).
     for n in fisher:
         fisher[n] /= cfg.fisher_batches
+    mean_k = (sum(v.sum() for v in fisher.values())
+              / sum(v.numel() for v in fisher.values())).clamp_min(1e-12)
+    for n in fisher:
+        fisher[n] /= mean_k                     # 이제 mean(F_k)=1
         if prev is not None:
-            fisher[n] += prev["fisher"][n]
+            fisher[n] += prev["fisher"][n]      # prev도 mean=1 -> 대등하게 더해진다
+
+    # 최종적으로 다시 mean=1. 태스크가 늘어도 λ의 세기가 그대로 유지된다
+    # (합 누적을 원하면 이 나눗셈을 빼면 되지만, 그러면 λ가 태스크 수에 딸려 변한다).
     scale = (sum(v.sum() for v in fisher.values()) / sum(v.numel() for v in fisher.values())).clamp_min(1e-12)
 
     return {
@@ -201,6 +235,8 @@ def probe_mse(cfg: E0Config, policy: PreTrainedPolicy, repo_id: str, device) -> 
         pin_memory=device.type == "cuda",
         drop_last=True,
     )
+    # 로더 반복자를 만들기 전에 고정해야 샘플러 셔플까지 재현된다.
+    torch.manual_seed(cfg.probe_seed)
     it = cycle(loader)
     policy.eval()
     total = 0.0
@@ -345,6 +381,15 @@ def train(cfg: E0Config):
     logging.info("Creating policy")
     policy = make_policy(cfg=cfg.policy, ds_meta=dataset.meta)
 
+    # ── reprobe: 학습/Fisher를 건너뛰고 이 체크포인트를 프로브만 다시 잰다 ──
+    # 프로브 코드가 바뀌었을 때(시드 고정, SR 버그 수정 등) 재학습 없이 결과를 갱신한다.
+    if cfg.reprobe:
+        logging.info(colored(
+            f"[E0] reprobe — 학습 없음. ckpt={cfg.policy.pretrained_path}", "magenta", attrs=["bold"]))
+        run_probe(cfg, policy, device)
+        logging.info("End of E0 reprobe")
+        return
+
     ewc_state = None
     if cfg.ewc_state_path and Path(cfg.ewc_state_path).exists():
         ewc_state = torch.load(cfg.ewc_state_path, map_location=device, weights_only=False)
@@ -441,29 +486,56 @@ def train(cfg: E0Config):
 
     # [11] Fisher 갱신 -> 프로브
     # 둘 다 "이 태스크를 막 끝낸 파라미터"에서 재야 MSE와 SR이 같은 x축 위에 놓인다.
-    if cfg.ewc_lambda > 0 and not frozen:
-        if math.isinf(cfg.ewc_lambda):
-            # 동결 팔은 Fisher를 쓰지 않는다. 다음 스테이지에 "이전 태스크가 있다"만 알리면 된다.
-            state = {"fisher": {}, "anchor": {n: p.detach() for n, p in policy.named_parameters()
-                                              if p.requires_grad}}
-        else:
-            state = build_ewc_state(cfg, policy, dataset, train_eps, device, ewc_state)
+    #
+    # ★ 동결(frozen) 스테이지에서도 반드시 저장해야 한다.
+    #   frozen = isinf(λ) and ewc_state is not None 이므로, 동결됐다고 저장을 건너뛰면
+    #   다음 스테이지가 파일을 못 찾아 ewc_state=None -> frozen=False가 되고,
+    #   λ=inf 팔이 그냥 파인튜닝으로 돌아가 버린다(동결->학습->동결->학습 지그재그).
+    state = None
+    if math.isinf(cfg.ewc_lambda):
+        # 동결 팔은 Fisher를 쓰지 않는다. 다음 스테이지에 "지킬 이전 태스크가 있다"만 알리면 된다.
+        state = {"fisher": {}, "anchor": {n: p.detach() for n, p in policy.named_parameters()
+                                          if p.requires_grad}}
+    elif cfg.ewc_lambda > 0:
+        state = build_ewc_state(cfg, policy, dataset, train_eps, device, ewc_state)
+    if state is not None:
         path = Path(cfg.output_dir) / "ewc_state.pt"
         torch.save({k: {n: v.cpu() for n, v in d.items()} for k, d in state.items()}, path)
         logging.info(colored(f"[E0] EWC state saved -> {path}", "green"))
 
     logging.info(colored("[E0] probing (held-out MSE + SR)", "cyan", attrs=["bold"]))
     run_probe(cfg, policy, device)
+
+    # 스테이지가 끝까지 갔다는 표식. E0.sh는 이 파일이 있을 때만 스테이지를 건너뛴다.
+    # (디렉터리 존재만 보고 건너뛰면 중간에 죽은 스테이지가 영원히 재실행되지 않는다.)
+    (Path(cfg.output_dir) / ".done").write_text(f"steps={cfg.steps}\nlambda={cfg.ewc_lambda}\n")
     logging.info("End of E0 stage")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  그림: λ별 MSE(왼쪽) / SR(오른쪽)
+#  그림
 # ═════════════════════════════════════════════════════════════════════════════
-def plot_e0(results_path: str, out_path: str) -> None:
+def load_rows(results_path: str) -> list[dict]:
+    """JSONL을 읽고 중복 스테이지를 정리한다.
+
+    ★ JSONL은 append-only다. 같은 스테이지를 다시 돌리면 옛 행이 그대로 남아 평균에 섞인다
+      (λ=0에서 SR이 전부 0인 실패 런과 정상 런이 같이 평균돼 10%가 나왔던 원인).
+      같은 (run_tag, seed, stage, probe_task)는 파일 뒤쪽 = 나중 실행만 남긴다.
+    """
     rows = [json.loads(x) for x in Path(results_path).read_text().splitlines() if x.strip()]
     if not rows:
         raise SystemExit(f"no rows in {results_path}")
+    uniq: dict[tuple, dict] = {}
+    for r in rows:
+        uniq[(r["run_tag"], r["seed"], r["stage"], r["probe_task"])] = r
+    if len(rows) != len(uniq):
+        print(f"deduped: dropped {len(rows) - len(uniq)} stale row(s), kept the latest per "
+              f"(run_tag, seed, stage, probe_task)")
+    return list(uniq.values())
+
+
+def plot_e0(results_path: str, out_path: str) -> None:
+    rows = load_rows(results_path)
 
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     csv_path = str(Path(out_path).with_suffix(".csv"))
@@ -489,41 +561,150 @@ def plot_e0(results_path: str, out_path: str) -> None:
 
     tags = sorted({r["run_tag"] for r in rows}, key=lam_key)
     stages = sorted({r["stage"] for r in rows})
+    tasks = sorted({r["probe_task"] for r in rows})
+
+    def series(tag, task, key):
+        """태스크 j의 (stage, value) 궤적. j를 배운 k=j부터 시작한다."""
+        pts = [(r["stage"], r[key]) for r in rows
+               if r["run_tag"] == tag and r["probe_task"] == task and r.get(key) is not None]
+        return sorted(pts)
 
     def old_mean(tag, stage, key):
-        """이전 태스크(j<k)들의 평균. 망각의 정도를 보는 값."""
+        """이전 태스크(j<k)들의 평균 = CL 논문의 average accuracy."""
         v = [r[key] for r in rows
              if r["run_tag"] == tag and r["stage"] == stage and r["is_old"] and r.get(key) is not None]
         return sum(v) / len(v) if v else None
 
+    def finish(ax, key):
+        ax.set_xlabel("training stage k")
+        ax.set_xticks(stages)
+        ax.grid(alpha=0.3)
+        if key == "sr":
+            ax.set_ylim(-3, 103)
+        if not ax.get_legend_handles_labels()[0]:
+            # SR은 gym_libero가 없으면 통째로 비어 있다.
+            ax.text(0.5, 0.5, "no data (gym_libero not installed?)", ha="center", va="center",
+                    transform=ax.transAxes, color="gray")
+
+    # ── 그림 1: λ마다 태스크별 궤적 ──────────────────────────────────────────
+    # 평균 한 줄로는 못 읽는다. SR은 태스크당 사실상 0 아니면 90~100의 이진값이라
+    # mean(90,0,0)=30 이 "전부 30%"처럼 보인다. 어느 태스크가 죽었는지는 개별 선으로만 보인다.
+    # 그림 안 텍스트는 영어로. 기본 matplotlib 폰트에 한글 글리프가 없어 두부(□)가 된다.
+    cmap = plt.get_cmap("tab10")
+    fig, axes = plt.subplots(len(tags), 2, figsize=(13, 3.6 * len(tags)), squeeze=False)
+    for i, tag in enumerate(tags):
+        for col, (key, ylabel) in enumerate((("mse", "held-out MSE"), ("sr", "SR (%)"))):
+            ax = axes[i][col]
+            for j in tasks:
+                pts = series(tag, j, key)
+                if pts:
+                    ax.plot(*zip(*pts), "-o", ms=4, color=cmap(j % 10), label=f"task {j}")
+            # k=j (그 태스크를 막 배운 시점)를 크게 표시한다. 그 오른쪽이 곧 망각 곡선이다.
+            cur = [(r["stage"], r[key]) for r in rows
+                   if r["run_tag"] == tag and r["stage"] == r["probe_task"] and r.get(key) is not None]
+            if cur:
+                ax.scatter(*zip(*cur), s=110, facecolors="none", edgecolors="k",
+                           linewidths=1.2, zorder=3, label="just learned")
+            ax.set(ylabel=ylabel, title=f"lambda={tag}  |  "
+                                        f"{'MSE (objective)' if key == 'mse' else 'SR (what we care about)'}")
+            finish(ax, key)
+    # 범례는 그림 하나에 한 번만. 패널마다 넣으면 SR 패널의 데이터를 가린다.
+    handles: dict[str, Any] = {}
+    for ax in axes.ravel():
+        for h, lb in zip(*ax.get_legend_handles_labels(), strict=True):
+            handles.setdefault(lb, h)
+    if handles:
+        fig.legend(handles.values(), handles.keys(), loc="upper center",
+                   bbox_to_anchor=(0.5, 0.965), ncol=len(handles), fontsize=9, frameon=False)
+    fig.suptitle("E0: per-task retention (open circle = task just learned)", fontweight="bold")
+    fig.tight_layout(rect=(0, 0, 1, 0.965))
+    fig.savefig(out_path, dpi=160, bbox_inches="tight")
+    print(f"saved figure -> {out_path}")
+    plt.close(fig)
+
+    # ── 그림 2: λ 비교 요약 (옛 태스크 평균) ─────────────────────────────────
+    # 표준 average-accuracy 뷰. 개별 태스크는 그림 1에서 봐야 한다.
+    sum_path = str(Path(out_path).with_name(Path(out_path).stem + "_summary.png"))
     fig, (ax_mse, ax_sr) = plt.subplots(1, 2, figsize=(13, 5))
     for tag in tags:
         for ax, key in ((ax_mse, "mse"), (ax_sr, "sr")):
-            # stage 0에는 이전 태스크가 없고, SR은 gym_libero가 없으면 통째로 비어 있다.
+            # stage 0에는 이전 태스크가 없다.
             pts = [(s, old_mean(tag, s, key)) for s in stages]
             pts = [(s, v) for s, v in pts if v is not None]
             if pts:
-                ax.plot(*zip(*pts), "-o", ms=5, label=f"λ={tag}")
-
-    # 그림 안 텍스트는 영어로. 기본 matplotlib 폰트에 한글 글리프가 없어 두부(□)가 된다.
-    ax_mse.set(xlabel="training stage k", ylabel="held-out MSE on old tasks",
-               title="MSE  (the training objective)")
-    ax_sr.set(xlabel="training stage k", ylabel="SR on old tasks (%)",
-              title="SR  (what we actually care about)", ylim=(-3, 103))
-    for ax in (ax_mse, ax_sr):
-        ax.set_xticks(stages)
-        ax.grid(alpha=0.3)
+                ax.plot(*zip(*pts), "-o", ms=5, label=f"lambda={tag}")
+    ax_mse.set(ylabel="mean held-out MSE on old tasks", title="MSE  (the training objective)")
+    ax_sr.set(ylabel="mean SR on old tasks (%)", title="SR  (what we actually care about)")
+    for ax, key in ((ax_mse, "mse"), (ax_sr, "sr")):
+        finish(ax, key)
         if ax.get_legend_handles_labels()[0]:
             ax.legend(fontsize=9, title="EWC lambda", title_fontsize=9)
-        else:
+    fig.suptitle("EWC lambda sweep: flat MSE with collapsing SR = loss/SR anchor mismatch",
+                 fontweight="bold")
+    fig.tight_layout()
+    fig.savefig(sum_path, dpi=160, bbox_inches="tight")
+    print(f"saved figure -> {sum_path}")
+    plt.close(fig)
+
+    # ── 그림 3: 스테이지별 프로파일 (k 고정, x축 = 태스크 j) ─────────────────
+    # "몇 번째 태스크를 배웠을 때 무너지는가"는 평균으로는 안 보인다. k를 고정하고
+    # x축을 태스크 j로 두면, 그 시점에 어느 태스크가 죽어 있는지 한눈에 읽힌다.
+    # k마다 파일 하나씩 + 마지막에 전부 모은 한 장.
+    def stage_panel(ax, stage, key, ylabel):
+        for t, tag in enumerate(tags):
+            pts = sorted((r["probe_task"], r[key]) for r in rows
+                         if r["run_tag"] == tag and r["stage"] == stage and r.get(key) is not None)
+            if pts:
+                ax.plot(*zip(*pts), "-o", ms=5, color=cmap(t % 10), label=f"lambda={tag}")
+        # j=k 왼쪽이 옛 태스크, j=k가 방금 배운 태스크.
+        ax.axvline(stage, color="k", ls="--", lw=0.9, alpha=0.5)
+        ax.set(xlabel="probe task j", ylabel=ylabel,
+               title=f"k={stage}  ({stage + 1} task{'s' if stage else ''} learned)")
+        ax.set_xticks(tasks)
+        ax.grid(alpha=0.3)
+        if key == "sr":
+            ax.set_ylim(-3, 103)
+        if not ax.get_legend_handles_labels()[0]:
             ax.text(0.5, 0.5, "no data (gym_libero not installed?)", ha="center", va="center",
                     transform=ax.transAxes, color="gray")
-    fig.suptitle(
-        "EWC lambda sweep: flat MSE with collapsing SR = loss/SR anchor mismatch", fontweight="bold"
-    )
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=160, bbox_inches="tight")
-    print(f"saved figure -> {out_path}")
+
+    def fig_legend(fig, axes_list, y=0.965):
+        h: dict[str, Any] = {}
+        for ax in axes_list:
+            for handle, lb in zip(*ax.get_legend_handles_labels(), strict=True):
+                h.setdefault(lb, handle)
+        if h:
+            fig.legend(h.values(), h.keys(), loc="upper center", bbox_to_anchor=(0.5, y),
+                       ncol=len(h), fontsize=9, frameon=False)
+
+    stem = Path(out_path).stem
+    metrics = (("mse", "held-out MSE"), ("sr", "SR (%)"))
+    for s in stages:
+        fig, axs = plt.subplots(1, 2, figsize=(13, 5))
+        for ax, (key, ylabel) in zip(axs, metrics, strict=True):
+            stage_panel(ax, s, key, ylabel)
+        fig_legend(fig, list(axs), y=0.90)
+        fig.suptitle(f"E0 stage k={s}: per-task MSE / SR after learning tasks 0..{s} "
+                     f"(dashed = task just learned)", fontweight="bold")
+        fig.tight_layout(rect=(0, 0, 1, 0.90))
+        p = str(Path(out_path).with_name(f"{stem}_stage{s}.png"))
+        fig.savefig(p, dpi=160, bbox_inches="tight")
+        print(f"saved figure -> {p}")
+        plt.close(fig)
+
+    # 전부 모은 한 장. 행 안에서 y축을 공유해 스테이지끼리 눈으로 비교된다.
+    fig, axes = plt.subplots(2, len(stages), figsize=(4.6 * len(stages), 8.5),
+                             squeeze=False, sharey="row")
+    for col, s in enumerate(stages):
+        for row, (key, ylabel) in enumerate(metrics):
+            stage_panel(axes[row][col], s, key, ylabel if col == 0 else "")
+    fig_legend(fig, list(axes.ravel()))
+    fig.suptitle("E0: all stages side by side — where does SR collapse?", fontweight="bold")
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
+    p = str(Path(out_path).with_name(f"{stem}_stages_all.png"))
+    fig.savefig(p, dpi=160, bbox_inches="tight")
+    print(f"saved figure -> {p}")
+    plt.close(fig)
 
 
 if __name__ == "__main__":
