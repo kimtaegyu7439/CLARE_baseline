@@ -34,9 +34,19 @@ REPLAY_BS=8;
 NUM_WORKERS=12;
 REPLAY_NUM_WORKERS=4;
 
-# Evaluate every task seen so far at the end of each stage. Set this above STEPS
-# (e.g. 200000, as the CLARE scripts do) to train without in-training rollouts.
-EVAL_FREQ=$STEPS;
+# ★ 학습 중 시뮬레이터 평가는 기본으로 꺼 둔다 (EVAL_FREQ=0).
+#
+# 왜 0이어야 하는가 — 200000 같은 큰 값으로는 부족하다.
+#   train.py:371 의 조건이 `cfg.eval_freq > 0` 이라, 평가가 한 번도 실행되지 않아도
+#   시작 시점에 make_env(n_envs=eval.batch_size)가 호출된다. LIBERO 환경 하나가
+#   MuJoCo + EGL 렌더링 컨텍스트를 GPU에 잡으므로 batch_size=50이면 정책이 올라갈
+#   자리가 남지 않는다 (실측: "Creating env" 70초 뒤 LanguageEncoder.to(cuda)에서
+#   CUDA out of memory). eval_freq=0 이면 make_env 호출 자체를 건너뛴다.
+#
+#   성공률은 학습이 끝난 뒤 체크포인트로 따로 잰다 -> bash/er/eval_*.sh
+#
+# 학습 중 평가를 굳이 켜려면 EVAL_FREQ=$STEPS 로 주되 BS_EVAL도 같이 낮춰라(10 이하).
+EVAL_FREQ=${EVAL_FREQ:-0};
 
 python ./lerobot_lsy/src/lerobot/scripts/train.py \
     --seed=$SEED \
