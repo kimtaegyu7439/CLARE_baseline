@@ -47,7 +47,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --train_discriminators_save_freq=2000 \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
-    --wandb.project=clare_experiments \
+    --wandb.project=clare_libero_goal \
     ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
@@ -83,7 +83,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --train_discriminators_save_freq=2000 \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
-    --wandb.project=clare_experiments \
+    --wandb.project=clare_libero_goal \
     ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
@@ -119,7 +119,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --train_discriminators_save_freq=2000 \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
-    --wandb.project=clare_experiments \
+    --wandb.project=clare_libero_goal \
     ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
@@ -155,7 +155,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --train_discriminators_save_freq=2000 \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
-    --wandb.project=clare_experiments \
+    --wandb.project=clare_libero_goal \
     ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
@@ -191,7 +191,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --train_discriminators_save_freq=2000 \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
-    --wandb.project=clare_experiments \
+    --wandb.project=clare_libero_goal \
     ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
@@ -227,7 +227,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --train_discriminators_save_freq=2000 \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
-    --wandb.project=clare_experiments \
+    --wandb.project=clare_libero_goal \
     ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
@@ -263,7 +263,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --train_discriminators_save_freq=2000 \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
-    --wandb.project=clare_experiments \
+    --wandb.project=clare_libero_goal \
     ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
@@ -299,7 +299,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --train_discriminators_save_freq=2000 \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
-    --wandb.project=clare_experiments \
+    --wandb.project=clare_libero_goal \
     ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
@@ -335,7 +335,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --train_discriminators_save_freq=2000 \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
-    --wandb.project=clare_experiments \
+    --wandb.project=clare_libero_goal \
     ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
@@ -371,5 +371,5 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --train_discriminators_save_freq=2000 \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
-    --wandb.project=clare_experiments \
+    --wandb.project=clare_libero_goal \
     ${WANDB_ENTITY_ARG};
