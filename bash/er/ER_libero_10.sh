@@ -59,7 +59,7 @@ python ./lerobot_lsy/src/lerobot/scripts/train.py \
     --log_freq=$LOG_STEPS \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
-    --wandb.project=clare_experiments \
+    --wandb.project=ER_clare_10 \
     ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/er.py \
@@ -87,7 +87,7 @@ python ./lerobot_lsy/src/lerobot/scripts/er.py \
     --log_freq=$LOG_STEPS \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
-    --wandb.project=clare_experiments \
+    --wandb.project=ER_clare_10 \
     ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/er.py \
@@ -115,7 +115,7 @@ python ./lerobot_lsy/src/lerobot/scripts/er.py \
     --log_freq=$LOG_STEPS \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
-    --wandb.project=clare_experiments \
+    --wandb.project=ER_clare_10 \
     ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/er.py \
@@ -143,7 +143,7 @@ python ./lerobot_lsy/src/lerobot/scripts/er.py \
     --log_freq=$LOG_STEPS \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
-    --wandb.project=clare_experiments \
+    --wandb.project=ER_clare_10 \
     ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/er.py \
@@ -171,7 +171,7 @@ python ./lerobot_lsy/src/lerobot/scripts/er.py \
     --log_freq=$LOG_STEPS \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
-    --wandb.project=clare_experiments \
+    --wandb.project=ER_clare_10 \
     ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/er.py \
@@ -199,7 +199,7 @@ python ./lerobot_lsy/src/lerobot/scripts/er.py \
     --log_freq=$LOG_STEPS \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
-    --wandb.project=clare_experiments \
+    --wandb.project=ER_clare_10 \
     ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/er.py \
@@ -227,7 +227,7 @@ python ./lerobot_lsy/src/lerobot/scripts/er.py \
     --log_freq=$LOG_STEPS \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
-    --wandb.project=clare_experiments \
+    --wandb.project=ER_clare_10 \
     ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/er.py \
@@ -255,7 +255,7 @@ python ./lerobot_lsy/src/lerobot/scripts/er.py \
     --log_freq=$LOG_STEPS \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
-    --wandb.project=clare_experiments \
+    --wandb.project=ER_clare_10 \
     ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/er.py \
@@ -283,7 +283,7 @@ python ./lerobot_lsy/src/lerobot/scripts/er.py \
     --log_freq=$LOG_STEPS \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
-    --wandb.project=clare_experiments \
+    --wandb.project=ER_clare_10 \
     ${WANDB_ENTITY_ARG} \
 && \
 python ./lerobot_lsy/src/lerobot/scripts/er.py \
@@ -311,5 +311,5 @@ python ./lerobot_lsy/src/lerobot/scripts/er.py \
     --log_freq=$LOG_STEPS \
     --wandb.enable=true \
     --wandb.disable_artifact=true \
-    --wandb.project=clare_experiments \
+    --wandb.project=ER_clare_10 \
     ${WANDB_ENTITY_ARG};

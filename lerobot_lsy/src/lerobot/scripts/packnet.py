@@ -68,20 +68,48 @@ class PackNetTrainPipelineConfig(TrainPipelineConfig):
     max_episodes_rendered: int = 100
 
 
+def is_maskable(parameter: torch.nn.Parameter) -> bool:
+    """Whether a parameter gets split across tasks by a mask, or is frozen instead.
+
+    Weight matrices (ndim >= 2) are large enough to partition and are what PackNet is
+    about. Biases and normalization gains/offsets (ndim < 2) are not partitioned: they
+    are frozen after task 0, which is what the module-keyed implementation did too.
+    """
+    return parameter.ndim >= 2
+
+
+def build_masks(policy: torch.nn.Module, ignore_modules: list[str]) -> dict:
+    """Initial mask for task 0: every maskable parameter is free (all ones).
+
+    Keys are **parameter** names, not module names. Keying by module only reaches
+    `module.weight`, which silently skips any module that holds its weights as a plain
+    Parameter — nn.MultiheadAttention keeps its qkv projection in `in_proj_weight`
+    (6 layers x 786K = 4.7M parameters here), so those were never masked and kept
+    training across tasks, defeating the preservation guarantee.
+    """
+    return {
+        name: torch.ones_like(parameter, dtype=torch.int8, device=parameter.device)
+        for name, parameter in policy.named_parameters()
+        if parameter.requires_grad
+        and is_maskable(parameter)
+        and not any(ignore_module in name for ignore_module in ignore_modules)
+    }
+
+
 @torch.no_grad()
 def prune(cfg: PackNetTrainPipelineConfig, policy: torch.nn.Module, previous_mask: dict):
     """
     Prune cfg.prune_ratio of current_task's weights (by magnitude).
-    mask keys are layer names (from named_modules).
+    mask keys are parameter names (from named_parameters).
     Returns new mask dict.
     """
     current_masks = {}
 
-    for name, module in policy.named_modules():
+    for name, parameter in policy.named_parameters():
         if not name in previous_mask.keys():
             continue
 
-        weight = module.weight.data
+        weight = parameter.data
         layer_mask = previous_mask[name].clone().to(weight.device)
 
         # Select weights belonging to current task
@@ -112,30 +140,70 @@ def prune(cfg: PackNetTrainPipelineConfig, policy: torch.nn.Module, previous_mas
     return current_masks
 
 
-def mask_gradient(policy: torch.nn.Module, mask: dict, current_task: int):
+def mask_gradient(policy: torch.nn.Module, mask: dict, current_task: int, ignore_modules: list[str]):
     """
     Zero gradients for all weights not assigned to current_task.
-    mask: dict mapping layer_name -> mask tensor
+    mask: dict mapping parameter_name -> mask tensor
+
+    Every trainable parameter must end up in exactly one of three buckets, or the
+    preservation guarantee has a hole in it:
+      - in the mask  → gated, only this task's slots may move
+      - not in the mask (biases, LayerNorm/BatchNorm gains and offsets) → frozen
+      - inside an ignored module → left alone (the caller froze it)
     """
 
-    for name, module in policy.named_modules():
-        # Conv/Linear family → gate gradients by mask
-        if isinstance(module, (torch.nn.Conv2d, torch.nn.Linear, torch.nn.modules.linear.NonDynamicallyQuantizableLinear)):
-            if module.weight.grad is not None and name in mask.keys():
-                layer_mask = mask[name].to(module.weight.grad.device)
-                module.weight.grad.data[layer_mask.ne(current_task + 1)] = 0
-                if module.bias is not None and module.bias.grad is not None and name in mask.keys():
-                    module.bias.grad.data.fill_(0)
+    for name, parameter in policy.named_parameters():
+        if parameter.grad is None:
+            continue
+        if any(ignore_module in name for ignore_module in ignore_modules):
+            continue
 
-        # Normalization layers → freeze grads entirely
-        elif "BatchNorm" in str(type(module)) or "LayerNorm" in str(type(module)):
-            if module.weight is not None and module.weight.grad is not None:
-                module.weight.grad.data.fill_(0)
-            if module.bias is not None and module.bias.grad is not None:
-                module.bias.grad.data.fill_(0)
+        if name in mask.keys():
+            layer_mask = mask[name].to(parameter.grad.device)
+            parameter.grad.data[layer_mask.ne(current_task + 1)] = 0
+        else:
+            parameter.grad.data.fill_(0)
 
-        # Other modules (activations, Dropout, GELU, Identity, LayerScale, Embedding, ParameterDict, etc.)
-        # have no gradients to handle, so just skip them.
+
+@torch.no_grad()
+def snapshot_protected(
+    policy: torch.nn.Module, mask: dict, current_task: int, ignore_modules: list[str]
+) -> dict:
+    """Copy every weight this task may not touch, so restore_protected can put it back.
+
+    A zero gradient is not enough to hold a weight still. This policy's optimizer preset
+    is torch Adam with weight_decay=1e-6, and plain Adam couples weight decay into the
+    gradient (grad += wd * p) *before* the m/sqrt(v) normalization. So a parameter whose
+    gradient we zeroed still gets an update of roughly lr * sign(p) every step —
+    measured at 4e-6 after 10 steps, and it does not shrink with |w|. Over a 10k-step
+    stage that is not rounding noise, and PackNet's entire claim is that earlier tasks
+    do not move at all.
+
+    Protected = masked slots owned by an earlier task (or freed by pruning), plus the
+    parameters that are never partitioned (biases, LayerNorm/BatchNorm gains and offsets).
+    The set changes exactly once mid-stage, at the prune, so the caller re-snapshots there.
+    """
+    saved = {}
+    for name, parameter in policy.named_parameters():
+        if not parameter.requires_grad or any(m in name for m in ignore_modules):
+            continue
+        if name in mask:
+            keep = mask[name].to(parameter.device).ne(current_task + 1)
+            saved[name] = (keep, parameter.data[keep].clone())
+        else:
+            saved[name] = (None, parameter.data.clone())
+    return saved
+
+
+@torch.no_grad()
+def restore_protected(policy: torch.nn.Module, protected: dict) -> None:
+    """Write the protected weights back after the optimizer step."""
+    parameters = dict(policy.named_parameters())
+    for name, (keep, values) in protected.items():
+        if keep is None:
+            parameters[name].data.copy_(values)
+        else:
+            parameters[name].data[keep] = values
 
 
 
@@ -148,6 +216,8 @@ def update_policy(
     grad_scaler: GradScaler,
     mask: torch.nn.ParameterDict,
     current_task: int,
+    ignore_modules: list[str],
+    protected: dict,
     lr_scheduler=None,
     use_amp: bool = False,
     lock=None,
@@ -160,7 +230,7 @@ def update_policy(
         # TODO(rcadene): policy.unnormalize_outputs(out_dict)
     grad_scaler.scale(loss).backward()
 
-    mask_gradient(policy, mask, current_task)
+    mask_gradient(policy, mask, current_task, ignore_modules)
 
     # Unscale the gradient of the optimizer's assigned params in-place **prior to gradient clipping**.
     grad_scaler.unscale_(optimizer)
@@ -177,6 +247,10 @@ def update_policy(
         grad_scaler.step(optimizer)
     # Updates the scale for next iteration.
     grad_scaler.update()
+
+    # Masking the gradient only stops the gradient term; Adam's coupled weight decay
+    # still moves the weight. Put the protected values back. See snapshot_protected.
+    restore_protected(policy, protected)
 
     optimizer.zero_grad()
 
@@ -243,45 +317,44 @@ def train(cfg: PackNetTrainPipelineConfig):
 
     ignore_modules = [ignore_module.strip() for ignore_module in cfg.ignore_modules.split(",") if ignore_module.strip()]
 
+    for name, module in policy.named_modules():
+        if any(ignore_module in name for ignore_module in ignore_modules):
+            if cfg.current_task > 0:
+                for parameter in module.parameters():
+                    parameter.requires_grad = False
+            module.eval()
+            logging.info(f"Skip module {name}")
+        elif "BatchNorm" in str(type(module)) or "LayerNorm" in str(type(module)):
+            module.eval()
+
     if cfg.current_task > 0:
         logging.info("Loading previous mask")
 
         mask = load_file(Path(cfg.policy.pretrained_path) / "mask.safetensors", cfg.policy.device)
 
-        # for name in mask.keys():
-        #     layer_mask = mask[name]
-        #     layer_mask[layer_mask.eq(0)] = cfg.current_task + 1
-
-        for name, module in policy.named_modules():
-            if any(ignore_module in name for ignore_module in ignore_modules): 
-                for parameter in module.parameters():
-                    parameter.requires_grad = False
-                module.eval()
-                logging.info(f"Skip module {name}")
-                continue
-            if name in mask.keys():
-                layer_mask = mask[name]
-                layer_mask[layer_mask.eq(0)] = cfg.current_task + 1
-            elif "BatchNorm" in str(type(module)) or "LayerNorm" in str(type(module)):
-                module.eval()
+        # Slots freed by the previous task's pruning become this task's to write into.
+        # Everything else still belongs to an earlier task and mask_gradient keeps it still.
+        for name in mask.keys():
+            layer_mask = mask[name]
+            layer_mask[layer_mask.eq(0)] = cfg.current_task + 1
 
     else:
         logging.info("Creating first mask")
-        mask = {}
-        for name, module in policy.named_modules():
-            if any(ignore_module in name for ignore_module in ignore_modules): 
-                # for parameter in module.parameters():
-                #     parameter.requires_grad = False
-                module.eval()
-                logging.info(f"Skip module {name}")
-                continue
-            
-            if isinstance(module, (torch.nn.Conv2d, torch.nn.Linear, torch.nn.modules.linear.NonDynamicallyQuantizableLinear)):
-                if module.weight.requires_grad:
-                    mask[name] = torch.ones_like(module.weight, dtype=torch.int8, device=module.weight.device) # all 1
-            elif "BatchNorm" in str(type(module)) or "LayerNorm" in str(type(module)):
-                module.eval()
-    
+        mask = build_masks(policy, ignore_modules)
+
+    # Nothing trainable may fall outside the mask/freeze split, or it would drift across
+    # tasks unnoticed. Report the split so a silent hole shows up in the log.
+    masked = sum(int(m.numel()) for m in mask.values())
+    frozen = sum(
+        parameter.numel()
+        for name, parameter in policy.named_parameters()
+        if parameter.requires_grad
+        and name not in mask
+        and not any(ignore_module in name for ignore_module in ignore_modules)
+    )
+    logging.info(f"PackNet coverage: {masked} masked / {frozen} frozen (bias, norm) parameters")
+
+
     cfg.optimizer.grad_clip_norm = 100.0
 
     logging.info("Creating optimizer and scheduler")
@@ -348,6 +421,8 @@ def train(cfg: PackNetTrainPipelineConfig):
     optimizer = pre_prune_optimizer
     lr_scheduler = pre_prune_lr_scheduler
 
+    protected = snapshot_protected(policy, mask, cfg.current_task, ignore_modules)
+
     logging.info("Start offline training on a fixed dataset")
     for _ in range(step, cfg.steps + cfg.post_prune_steps):
         start_time = time.perf_counter()
@@ -367,6 +442,8 @@ def train(cfg: PackNetTrainPipelineConfig):
             grad_scaler=grad_scaler,
             mask=mask,
             current_task=cfg.current_task,
+            ignore_modules=ignore_modules,
+            protected=protected,
             lr_scheduler=lr_scheduler,
             use_amp=cfg.policy.use_amp,
         )
@@ -478,6 +555,11 @@ def train(cfg: PackNetTrainPipelineConfig):
             mask = prune(cfg, policy, mask)
             optimizer = post_prune_optimizer
             lr_scheduler = post_prune_lr_scheduler
+
+            # Pruning moved slots out of this task's ownership and zeroed them, so the
+            # protected set just changed. Re-snapshot, otherwise the pruned weights would
+            # be nudged away from 0 during the post-prune retraining.
+            protected = snapshot_protected(policy, mask, cfg.current_task, ignore_modules)
 
             logging.info("Start post fine-tuning after prune")
 

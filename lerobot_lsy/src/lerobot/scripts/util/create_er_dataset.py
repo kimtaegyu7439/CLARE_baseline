@@ -10,7 +10,9 @@ from lerobot.scripts.visualize_dataset import EpisodeSampler
 from lerobot.datasets.utils import DEFAULT_FEATURES
 
 
-def sample_episodes(dataset: LeRobotDataset, sample_size: int, seed: int = 42) -> list[int]:
+def sample_episodes(
+    dataset: LeRobotDataset, sample_size: int, seed: int = 42, holdout_episodes: int = 0
+) -> list[int]:
     """
     Randomly sample a given number of episodes from a dataset.
 
@@ -18,12 +20,23 @@ def sample_episodes(dataset: LeRobotDataset, sample_size: int, seed: int = 42) -
         dataset (LeRobotDataset): The dataset to sample from.
         sample_size (int): Number of episodes to sample.
         seed (int, optional): Random seed for reproducibility. Defaults to 42.
+        holdout_episodes (int, optional): Exclude the last N episodes from the pool.
+            E0/R1 keep those episodes out of training and score held-out loss on them,
+            so a replay buffer that draws from them would be scored on data it trained
+            on. Defaults to 0 (sample from every episode).
 
     Returns:
         list[int]: List of sampled episode indices.
     """
     rng = random.Random(seed)
-    all_episodes = list(dataset.meta.episodes.keys())
+    all_episodes = sorted(dataset.meta.episodes.keys())
+    if holdout_episodes > 0:
+        if holdout_episodes >= len(all_episodes):
+            raise ValueError(
+                f"holdout_episodes={holdout_episodes} leaves no episode to sample from "
+                f"({len(all_episodes)} available)"
+            )
+        all_episodes = all_episodes[:-holdout_episodes]
     if sample_size > len(all_episodes):
         raise ValueError(
             f"Requested {sample_size} episodes, but dataset only has {len(all_episodes)}"
@@ -37,6 +50,7 @@ def merge_datasets(
     merged_repo_id: str,
     root: str | Path | None = None,
     seed: int = 42,
+    holdout_episodes: int = 0,
 ) -> LeRobotDataset:
     """
     Merge random episodes from multiple datasets.
@@ -47,6 +61,8 @@ def merge_datasets(
         merged_repo_id (str): New repo_id for the merged dataset.
         root (str | Path | None, optional): Root directory to save merged dataset. Defaults to None.
         seed (int, optional): Random seed. Defaults to 42.
+        holdout_episodes (int, optional): Exclude the last N episodes of each dataset from
+            the pool. See sample_episodes. Defaults to 0.
 
     Returns:
         LeRobotDataset: The merged dataset.
@@ -66,7 +82,7 @@ def merge_datasets(
 
     # --- Step 2: Process datasets ---
     for i, (dataset, sample_size) in enumerate(zip(datasets, sample_sizes)):
-        episode_index_list = sample_episodes(dataset, sample_size, seed + i)
+        episode_index_list = sample_episodes(dataset, sample_size, seed + i, holdout_episodes)
 
         for episode_index in episode_index_list:
             episode_sampler = EpisodeSampler(dataset, episode_index)
@@ -118,6 +134,13 @@ def parse_args():
         default=42,
         help="Random seed (default: 42)",
     )
+    parser.add_argument(
+        "--holdout_episodes",
+        type=int,
+        default=0,
+        help="Exclude the last N episodes of each dataset from the sampling pool "
+        "(default: 0). Use the same N as the training script's held-out split.",
+    )
     return parser.parse_args()
 
 if __name__ == "__main__":
@@ -133,6 +156,7 @@ if __name__ == "__main__":
         sample_sizes,  # number of episodes sampled from each
         merged_repo_id=args.merged_repo_id,
         seed=args.seed,
+        holdout_episodes=args.holdout_episodes,
     )
 
     print(merged_dataset)
