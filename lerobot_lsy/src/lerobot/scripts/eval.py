@@ -48,6 +48,7 @@ You can learn about the CLI options for this script in the `EvalPipelineConfig` 
 
 import json
 import logging
+import os          # EVAL_SEED (롤아웃 시드) 를 환경변수로 받기 위해
 import threading
 import time
 from contextlib import nullcontext
@@ -536,7 +537,7 @@ def eval_main(cfg: EvalMultiPipelineConfig):
             cfg.eval.n_episodes,
             max_episodes_rendered=cfg.eval.max_episodes_rendered,
             videos_dir=Path(cfg.output_dir) / "videos",
-            start_seed=cfg.seed,
+            start_seed=int(os.environ.get("EVAL_SEED", cfg.seed)),   # EVAL_SEED 가 있으면 롤아웃 시드만 그것으로 (학습 시드와 분리)
         )
     print(info["aggregated"])
 

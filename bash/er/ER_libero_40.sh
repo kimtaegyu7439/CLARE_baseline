@@ -5,7 +5,7 @@ SEED=${1:-42};
 
 # Sets HF_LEROBOT_HOME (dataset download dir), HF_HUB_CACHE (model download dir)
 # and PRETRAIN_PATH. Edit bash/clare/env.sh to change those locations.
-source "$(dirname "${BASH_SOURCE[0]}")/../clare/env.sh";
+source "$(dirname "${BASH_SOURCE[0]}")/er_env.sh";
 
 # Experience Replay (Chaudhry et al., "On Tiny Episodic Memories in Continual
 # Learning"): every step draws a batch from the current task AND a batch from a

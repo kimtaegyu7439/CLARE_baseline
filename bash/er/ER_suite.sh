@@ -26,7 +26,7 @@ export MUJOCO_GL=${MUJOCO_GL:-egl}
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
 export MUJOCO_EGL_DEVICE_ID=${MUJOCO_EGL_DEVICE_ID:-${CUDA_VISIBLE_DEVICES}}
 
-source "$(dirname "${BASH_SOURCE[0]}")/../clare/env.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/er_env.sh"
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 ER_PY=./lerobot_lsy/src/lerobot/scripts/er.py

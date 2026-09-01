@@ -20,7 +20,7 @@
 # 결과를 SR 행렬 txt로 모으려면: bash bash/er/collect_er_sr.sh libero_object
 
 set -uo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/../clare/env.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/er_env.sh"
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 export MUJOCO_GL=${MUJOCO_GL:-egl}

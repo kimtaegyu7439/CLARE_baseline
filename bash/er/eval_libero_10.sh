@@ -18,7 +18,7 @@
 #   (특정 태스크만: TASKS="0 3" — 스테이지보다 나중 태스크는 자동 제외)
 
 set -uo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/../clare/env.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/er_env.sh"
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 export MUJOCO_GL=${MUJOCO_GL:-egl}

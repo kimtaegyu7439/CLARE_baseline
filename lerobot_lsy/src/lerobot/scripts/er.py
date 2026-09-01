@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import logging
+import os          # EVAL_SEED (롤아웃 시드) 를 환경변수로 받기 위해
 import time
 from contextlib import nullcontext
 from pprint import pformat
@@ -389,7 +390,7 @@ def train(cfg: ERTrainPipelineConfig):
                         cfg.eval.n_episodes,
                         videos_dir=cfg.output_dir / "eval" / task / f"videos_step_{step_id}",
                         max_episodes_rendered=cfg.max_episodes_rendered,
-                        start_seed=cfg.seed,
+                        start_seed=int(os.environ.get("EVAL_SEED", cfg.seed)),   # EVAL_SEED 가 있으면 롤아웃 시드만 그것으로 (학습 시드와 분리)
                     )
                     eval_infos[task] = eval_info
 
