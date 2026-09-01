@@ -1,0 +1,10 @@
+{
+  "arm": "U",
+  "T_mode": "T0",
+  "coords": "collective",
+  "d_hat_after": 1.3339076439539592,
+  "diversity": 0.799986720085144,
+  "gate_failed": false,
+  "pass": true,
+  "strong": false
+}

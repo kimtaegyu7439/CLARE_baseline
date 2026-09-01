@@ -1,0 +1,10 @@
+{
+  "arm": "prod",
+  "T_mode": "T0",
+  "coords": "collective",
+  "d_hat_after": 1.390617569287618,
+  "diversity": 0.9888460040092468,
+  "gate_failed": false,
+  "pass": true,
+  "strong": false
+}

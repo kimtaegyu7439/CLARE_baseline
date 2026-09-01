@@ -1,0 +1,45 @@
+{
+  "arm": "L2",
+  "base": "R13",
+  "xt_mode": "teacher",
+  "base_diff": [
+    "1. R13 앵커는 B1.sample_fm 의 x_t=(1−t)ε+t·a_cur 를 재사용한다 — 행동 성분이 현재 task 것.",
+    "2. L2 는 과거 j 마다 â_j = ε₀ + v_Tj(ε₀, t=0, b_j, ℓ_j) 로 task-j 행동을 1-스텝 추정한다.",
+    "3. x_t = (1−t)ε′ + t·â_j 로 다시 만든다. t 는 B1 이 준 것을 그대로(같은 분포).",
+    "4. 그 외 level 항·λ·reduction·b_j 생성·teacher 운용은 R13 과 동일.",
+    "5. FM 본손실의 x_t 는 건드리지 않는다. â_j 는 no_grad·detach·매 스텝 폐기."
+  ],
+  "diag_every": 500,
+  "diag_t": [
+    0.1,
+    0.5,
+    0.9
+  ],
+  "lambda_level": 3.0,
+  "n_bins": 10,
+  "anchor_norm": "mean",
+  "chunk_backward": true,
+  "teacher": "rolling (1 snapshot)",
+  "embedding": "dinov2_cls_768_frozen",
+  "p_drop": 0.0,
+  "guidance_w": 1.0,
+  "argv": [
+    "B1.py",
+    "--p_drop",
+    "0",
+    "--guidance_w",
+    "1.0",
+    "--lambda_anchor",
+    "1.0",
+    "--out_dir",
+    "results/L2",
+    "--ckpt_root",
+    "/home/sa090180/clare/outputs/L2",
+    "--num_tasks",
+    "10",
+    "--suite",
+    "libero_spatial",
+    "--num_workers",
+    "6"
+  ]
+}

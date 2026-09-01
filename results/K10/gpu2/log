@@ -1,0 +1,31 @@
+Loading weights from local directory
+[K10gate] arm=U w=(0.0, 1.0)  M=40  r=32  bins=[2, 5, 8]  n=256  eta_target=0.02σ  step_clip=3.0×
+[K10gate] net=/home/sa090180/clare/outputs/K5_spatial_10task_smoke_M8/libero_spatial_seed42_ours/task_0/checkpoints/last/pretrained_model
+[K10gate] ℓ_0='pick up the black bowl between the plate and the ramekin and place it on the plate'
+[K10gate] emb_cache=results/K0/emb_cache/libero_spatial_task0.pt  (4718, 4, 768)
+[K10gate] blocks=[0, 1, 2, 3, 4, 5]  eps_probe(1, 16, 7)
+[K10gate] wstats 로드 results/K10/wstats_snapshot_task0.pt
+[K10gate] PCA 로드 results/K10/pca_task0.pt
+[K10gate] bin2  Ê 상수 wit=0.0031749 U=0.12322  d_real=26.28  가우시안 d̂=1.643
+[K10gate] bin5  Ê 상수 wit=0.0049906 U=0.046756  d_real=22.66  가우시안 d̂=2.036
+[K10gate] bin8  Ê 상수 wit=0.0070956 U=0.1864  d_real=24.00  가우시안 d̂=1.867
+[K10gate] U|T0|collective|bin2  d̂ 1.333->1.205  div 0.814  Ê_wit 26.561->67.136  Ê_U 0.955->0.954  (10s)
+           η=107.4 (target RMS 0.01252, cap 0.03757)  E 첫10 16.5 15.4 14.3 13.4 12.5 11.8 11.1 10.5 9.9 9.38
+[K10gate] U|T0|collective|bin5  d̂ 1.623->1.443  div 0.793  Ê_wit 20.103->48.747  Ê_U 1.321->1.094  (10s)
+           η=116.9 (target RMS 0.01264, cap 0.03791)  E 첫10 17.7 16.6 15.6 14.7 13.9 13.1 12.5 11.9 11.3 10.8
+[K10gate] U|T0|collective|bin8  d̂ 1.515->1.354  div 0.793  Ê_wit 9.523->39.443  Ê_U 0.986->1.006  (11s)
+           η=117.3 (target RMS 0.01251, cap 0.03754)  E 첫10 16.8 15.8 14.8 13.9 13.1 12.4 11.7 11.1 10.6 10.1
+[K10gate] U|const|collective|bin2  d̂ 1.337->1.389  div 1.071  Ê_wit 26.561->48.814  Ê_U 0.955->0.941  (10s)
+           η=107.4 (target RMS 0.01252, cap 0.03757)  E 첫10 16.5 16.6 16.7 16.7 16.8 16.9 17 17 17.1 17.2
+[K10gate] U|const|collective|bin5  d̂ 1.617->1.698  div 1.069  Ê_wit 20.103->27.525  Ê_U 1.321->1.197  (10s)
+           η=116.9 (target RMS 0.01264, cap 0.03791)  E 첫10 17.7 17.7 17.8 17.9 18 18 18 18.1 18.2 18.2
+[K10gate] U|const|collective|bin8  d̂ 1.517->1.572  div 1.072  Ê_wit 9.523->14.511  Ê_U 0.986->0.977  (11s)
+           η=117.3 (target RMS 0.01251, cap 0.03754)  E 첫10 16.8 16.9 17 17 17.1 17.2 17.3 17.3 17.4 17.5
+[K10gate] U|anneal|collective|bin2  d̂ 1.329->1.389  div 1.070  Ê_wit 26.561->48.525  Ê_U 0.955->0.940  (10s)
+           η=107.4 (target RMS 0.01252, cap 0.03757)  E 첫10 16.5 16.6 16.7 16.8 16.8 16.9 17 17 17.2 17.2
+[K10gate] U|anneal|collective|bin5  d̂ 1.617->1.693  div 1.068  Ê_wit 20.103->27.305  Ê_U 1.321->1.198  (11s)
+           η=116.9 (target RMS 0.01264, cap 0.03791)  E 첫10 17.7 17.7 17.8 17.9 18 18.1 18.1 18.2 18.2 18.3
+[K10gate] U|anneal|collective|bin8  d̂ 1.514->1.572  div 1.071  Ê_wit 9.523->14.370  Ê_U 0.986->0.978  (11s)
+           η=117.3 (target RMS 0.01251, cap 0.03754)  E 첫10 16.8 16.9 17 17.1 17.1 17.2 17.3 17.3 17.4 17.5
+
+[K10gate] U 완료 1.7분 -> results/K10/gpu2/partial.json

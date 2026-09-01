@@ -80,6 +80,19 @@ class AlohaEnv(EnvConfig):
 
 
 
+# gym 핸들 접두사 -> LIBERO 벤치마크 이름.
+# gym_libero/__init__.py는 핸들마다 (benchmark, task_id) 짝을 등록해 둔다
+# (예: Libero_Goal_Task_3 -> benchmark="libero_goal", task_id="task_3").
+# 이 표는 핸들 이름만 보고 그 짝의 benchmark 쪽을 되찾기 위한 것이다.
+LIBERO_TASK_PREFIX_TO_BENCHMARK = {
+    "Libero_10": "libero_10",
+    "Libero_Goal": "libero_goal",
+    "Libero_Spatial": "libero_spatial",
+    "Libero_Object": "libero_object",
+    "Libero_90": "libero_90",
+}
+
+
 @EnvConfig.register_subclass("libero")
 @dataclass
 class LiberoEnv(EnvConfig):
@@ -127,10 +140,33 @@ class LiberoEnv(EnvConfig):
         self.features["pixels/wrist_image"] = PolicyFeature(type=FeatureType.VISUAL, shape=(256, 256, 3))
 
     @property
+    def resolved_benchmark(self) -> str:
+        """task 핸들과 짝이 맞는 벤치마크 이름.
+
+        gym.make(handle, **gym_kwargs)는 benchmark를 덮어쓰지만 task_id는 핸들 등록값을
+        그대로 둔다(gym_libero/__init__.py). 그래서 handle과 무관한 benchmark를 넘기면
+        (benchmark, task_id) 짝이 깨져 **엉뚱한 태스크가 실행된다** --
+        env.py의 _make_env_task(benchmark, task_id)가 이 둘로 bddl/init state/언어지시를
+        모두 결정하기 때문이다.
+
+        실제로 libero_40(네 suite를 이어 붙인 40스테이지 시퀀스)에서 이 일이 있었다.
+        스테이지마다 --env.benchmark는 현재 suite 하나인데 --env.task에는 이전 suite의
+        핸들이 누적돼 넘어가므로, 과거 태스크가 전부 현재 suite의 같은 인덱스 태스크로
+        리매핑돼 평가됐다. 핸들에서 benchmark를 되찾아 그 짝을 항상 맞춘다.
+
+        핸들을 해석할 수 없으면(쉼표 목록 등) 설정값을 그대로 쓴다.
+        """
+        if self.task and "_Task_" in self.task:
+            prefix = self.task.rsplit("_Task_", 1)[0]
+            if prefix in LIBERO_TASK_PREFIX_TO_BENCHMARK:
+                return LIBERO_TASK_PREFIX_TO_BENCHMARK[prefix]
+        return self.benchmark
+
+    @property
     def gym_kwargs(self) -> dict:
         """gym.make(handle, **gym_kwargs)로 넘어가는 인자."""
         return {
-            "benchmark": self.benchmark,
+            "benchmark": self.resolved_benchmark,
             "max_episode_steps": self.episode_length,
         }
 

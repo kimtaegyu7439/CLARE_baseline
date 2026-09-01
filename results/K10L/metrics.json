@@ -1,0 +1,40 @@
+{
+  "learning_sr": {
+    "task0": 100.0,
+    "task1": 90.0,
+    "task2": null,
+    "task3": null,
+    "task4": null,
+    "task5": null,
+    "task6": null,
+    "task7": null,
+    "task8": null,
+    "task9": null
+  },
+  "note": "SR 칸에 결측이 있어 집계 지표를 내지 않는다",
+  "task_order": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+  ],
+  "config": {
+    "mode": "ours",
+    "p_drop": 0.0,
+    "lambda_anchor": 1.0,
+    "anchor_agg": "sum",
+    "suite": "libero_spatial",
+    "num_tasks": 10,
+    "steps_per_task": 5000,
+    "episodes_per_task": 45,
+    "eval_episodes": 20,
+    "seed": 42,
+    "guidance_w": 1.0
+  }
+}

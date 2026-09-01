@@ -22,7 +22,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/../clare/env.sh"
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 export MUJOCO_GL=${MUJOCO_GL:-egl}
-export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-3}
 export MUJOCO_EGL_DEVICE_ID=${MUJOCO_EGL_DEVICE_ID:-$CUDA_VISIBLE_DEVICES}
 
 BENCH_NAME=libero_spatial

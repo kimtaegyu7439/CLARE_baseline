@@ -1,0 +1,11 @@
+{
+  "arm": "B4",
+  "anchor": "query_point_conditional",
+  "lambda_a": 1.0,
+  "n_query": 32,
+  "pool": 128,
+  "gain": false,
+  "w_max": 2.0,
+  "xt_mode": "current",
+  "passthru": []
+}

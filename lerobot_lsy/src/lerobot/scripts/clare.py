@@ -54,6 +54,7 @@ train.py를 복사해 개조한 파일이라 뼈대(설정 -> 데이터셋 -> �
 """
 
 import logging
+import os          # EVAL_SEED (롤아웃 시드) 를 환경변수로 받기 위해
 import time
 from contextlib import nullcontext
 from pprint import pformat
@@ -545,6 +546,11 @@ def train(cfg: PEFTTrainPipelineConfig):
         for task in task_list:
             env_cfg = copy.deepcopy(cfg.env)
             env_cfg.task = task
+            # libero_40처럼 여러 suite가 섞인 시퀀스에서는 --env.benchmark 하나로
+            # 전부 덮으면 안 된다. 핸들과 짝이 맞는 benchmark로 맞춰 둔다
+            # (LiberoEnv.resolved_benchmark 주석 참고).
+            if hasattr(env_cfg, "benchmark"):
+                env_cfg.benchmark = env_cfg.resolved_benchmark
             # eval_env = make_env(
             #     env_cfg, 
             #     n_envs=cfg.eval.batch_size, 
@@ -1005,7 +1011,7 @@ def train(cfg: PEFTTrainPipelineConfig):
                         cfg.eval.n_episodes,
                         videos_dir=cfg.output_dir / "eval" / task / f"videos_step_{step_id}",
                         max_episodes_rendered=cfg.max_episodes_rendered,
-                        start_seed=cfg.seed,
+                        start_seed=int(os.environ.get("EVAL_SEED", cfg.seed)),
                     )
                     eval_infos[task] = eval_info
 

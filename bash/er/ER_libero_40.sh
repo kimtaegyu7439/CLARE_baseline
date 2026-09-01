@@ -1,6 +1,6 @@
 export MUJOCO_GL=egl;
-export CUDA_VISIBLE_DEVICES=1;
-export MUJOCO_EGL_DEVICE_ID=1;
+export CUDA_VISIBLE_DEVICES=0;
+export MUJOCO_EGL_DEVICE_ID=0;
 SEED=${1:-42};
 
 # Sets HF_LEROBOT_HOME (dataset download dir), HF_HUB_CACHE (model download dir)

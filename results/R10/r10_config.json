@@ -1,0 +1,27 @@
+{
+  "arm": "R10",
+  "lambda_level": 3.0,
+  "rho": 1.0,
+  "anchor_norm": "mean",
+  "n_bins": 10,
+  "warmup_steps": 50,
+  "use_ghat_weight": false,
+  "lambda_swap": 0.0,
+  "teacher": "rolling (1 snapshot)",
+  "embedding": "dinov2_cls_768_frozen",
+  "p_drop": 0.0,
+  "guidance_w": 1.0,
+  "argv": [
+    "B1.py",
+    "--p_drop",
+    "0",
+    "--guidance_w",
+    "1.0",
+    "--lambda_anchor",
+    "1.0",
+    "--out_dir",
+    "/home/sa090180/clare/results/R10",
+    "--ckpt_root",
+    "/home/sa090180/clare/outputs/R10"
+  ]
+}

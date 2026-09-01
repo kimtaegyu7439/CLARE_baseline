@@ -1,0 +1,17 @@
+{
+  "arm": "B2",
+  "anchor": "frozen_per_task_teachers",
+  "teacher_bf16": false,
+  "passthru": [
+    "--lambda_anchor",
+    "3",
+    "--p_drop",
+    "0",
+    "--anchor_agg",
+    "sum",
+    "--out_dir",
+    "results/mod0/B2_lam3",
+    "--ckpt_root",
+    "outputs/mod0/B2_lam3"
+  ]
+}

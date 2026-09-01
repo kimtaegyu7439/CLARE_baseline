@@ -1,0 +1,23 @@
+{
+  "suite": "libero_spatial",
+  "num_tasks": 4,
+  "episodes_per_task": 45,
+  "steps_per_task": 5000,
+  "batch_size": 32,
+  "num_workers": 8,
+  "p_drop": 0.1,
+  "lambda_anchor": 30.0,
+  "mode": "ours",
+  "eval_episodes": 20,
+  "eval_batch_size": 20,
+  "eval_after_each_task": true,
+  "guidance_w": 1.0,
+  "seed": 42,
+  "log_every": 100,
+  "smoke": false,
+  "out_dir": "results/B1_lam30",
+  "ckpt_root": "outputs/B1_lam30",
+  "device": "cuda",
+  "teacher_bf16": false,
+  "skip_verify": false
+}

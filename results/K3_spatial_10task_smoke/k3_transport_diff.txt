@@ -1,0 +1,31 @@
+@@ -2 +2 @@
+
+-        """w -> 과거 태스크 j 좌표로. b_j = c0 + W w' + res − m⊥_new[τ] + m⊥_j[τ]."""
++        """w -> 과거 태스크 j 좌표로. b_j = c0 + W w'  (잔여 성분 없음)."""
+@@ -11,2 +11,2 @@
+
+-            mj = quant_at(qtab_j, 0.5)[tau]
+-            sj = ((quant_at(qtab_j, 0.841) - quant_at(qtab_j, 0.159)) / 2)[tau]
++            mj = K1MOD.quant_at(qtab_j, 0.5)[tau]
++            sj = ((K1MOD.quant_at(qtab_j, 0.841) - K1MOD.quant_at(qtab_j, 0.159)) / 2)[tau]
+@@ -16 +16 @@
+
+-            probs = make_probs(self.Q, dev)
++            probs = K1MOD.make_probs(self.Q, dev)
+@@ -23 +23 @@
+
+-                p, out = cdf_forward(qn, probs, w.reshape(-1))
++                p, out = K1MOD.cdf_forward(qn, probs, w.reshape(-1))
+@@ -25 +25 @@
+
+-            wp = cdf_inverse(qj, p).view(B, r)
++            wp = K1MOD.cdf_inverse(qj, p).view(B, r)
+@@ -27,5 +27,2 @@
+
+-        if self.W is None:
+-            b = self.c0 + wp
+-        else:
+-            b = (self.c0 + wp @ self.W.T + res
+-                 - self.cur["m_perp"][tau] + self.stats[j]["m_perp"][tau])
++        # ★★★ K1 과 다른 유일한 줄 — res 와 m⊥ 항을 넣지 않는다 ★★★
++        b = self.c0 + (wp if self.W is None else wp @ self.W.T)

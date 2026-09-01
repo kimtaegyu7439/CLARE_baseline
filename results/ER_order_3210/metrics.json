@@ -1,0 +1,22 @@
+{
+  "AvgSR_final": 88.75,
+  "BWT": -11.666666666666666,
+  "task_order": [
+    3,
+    2,
+    1,
+    0
+  ],
+  "final_row": {
+    "task0": 100.0,
+    "task1": 90.0,
+    "task2": 75.0,
+    "task3": 90.0
+  },
+  "learning_sr": {
+    "stage0": 95.0,
+    "stage1": 95.0,
+    "stage2": 100.0,
+    "stage3": 100.0
+  }
+}
