@@ -28,8 +28,8 @@ BS_EVAL=50;
 # From task 1 on the batch is split BS (current task) + REPLAY_BS (buffer);
 # BS + REPLAY_BS == BS_FIRST keeps the memory footprint of every stage equal.
 BS_FIRST=32;
-BS=24;
-REPLAY_BS=8;
+BS=16;
+REPLAY_BS=16;
 NUM_WORKERS=12;
 REPLAY_NUM_WORKERS=4;
 
