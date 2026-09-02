@@ -1,0 +1,42 @@
+{
+  "arm": "L2_codebook",
+  "base": "L2",
+  "base_diff": [
+    "1. 앵커의 (o,s) 공급원을 시간-bin 가우시안에서 (s,o) 코드북으로 교체. 시간 축 제거.",
+    "2. task j 학습 중 같은 프레임의 (state 16, CLS 3072) 쌍을 저수지 표본으로 수집.",
+    "3. task 종료 시 표준화 s 공간 k-means(K=96) -> 셀별 (π, μ_s, σ_s, c, m, σ_o) 저장.",
+    "4. 앵커에서 k~Cat(π) -> s̃ -> softmax(−‖z(s̃)−c‖²/h²) 가중으로 õ. s̃ 가 õ 를 고른다.",
+    "5. teacher 부트스트랩 x_t·λ·reduction·teacher 운용·eval 은 L2 와 동일."
+  ],
+  "codebook_k": 96,
+  "n_pairs": 8000,
+  "h_scale": 1.0,
+  "xt_mode": "teacher",
+  "lambda_level": 3.0,
+  "anchor_norm": "mean",
+  "chunk_backward": true,
+  "time_bin": "제거 (R10.compute_stats/phase_bins 를 예외로 차단)",
+  "teacher": "rolling (1 snapshot)",
+  "embedding": "dinov2_cls_768_frozen",
+  "p_drop": 0.0,
+  "guidance_w": 1.0,
+  "argv": [
+    "B1.py",
+    "--p_drop",
+    "0",
+    "--guidance_w",
+    "1.0",
+    "--lambda_anchor",
+    "1.0",
+    "--out_dir",
+    "results/L2_codebook",
+    "--ckpt_root",
+    "/home/sa090180/clare/outputs/L2_codebook",
+    "--num_tasks",
+    "10",
+    "--suite",
+    "libero_spatial",
+    "--num_workers",
+    "6"
+  ]
+}
