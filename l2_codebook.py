@@ -102,7 +102,9 @@ def kmeans(x: torch.Tensor, K: int, n_init: int = 10, iters: int = 100,
 #  코드북
 # ═════════════════════════════════════════════════════════════════════════════
 def build_codebook(s: torch.Tensor, o: torch.Tensor, K: int, seed: int,
-                   min_n: int = 5, h_scale: float = 1.0) -> dict:
+                   min_n: int = 5, h_scale: float = 1.0,
+                   grad: bool = False, ridge_rho: float = 0.05,
+                   grad_min_frames: int = 24) -> dict:
     """(s(N,16), o(N,3072)) -> 코드북 dict. §2 그대로."""
     N = s.shape[0]
     mean_s, std_s = s.mean(0), s.std(0).clamp_min(1e-8)
@@ -141,6 +143,36 @@ def build_codebook(s: torch.Tensor, o: torch.Tensor, K: int, seed: int,
 
     mu_s, sig_s = per_cell(s, s.shape[1])
     m_o, sig_o = per_cell(o, o.shape[1])
+
+    # ── v2: 셀별 선형 기울기 A_k (3072x16) ──────────────────────────────────
+    # v1 은 셀 안에서 o 가 s 를 따라 움직이는 성분을 m_k 하나로 뭉개고, 그 변동을
+    # σ_o,k 에 분산으로 흡수한다(스미어). A_k 를 두면 õ 의 중심이 s̃ 를 서브셀
+    # 스케일로 따라가고, σ_o,k 는 **선형 잔차** 기준이 되어 얇아진다.
+    A = None
+    n_demoted = 0
+    stats_v1_var = sig_o.pow(2).sum(1).clone()      # 셀별 0차 총분산(로그용)
+    if grad:
+        D = o.shape[1]
+        zbar = (mu_s - mean_s) / std_s                          # (K_eff,16)
+        A = torch.zeros(K_eff, D, s.shape[1], device=o.device)
+        sig_lin = sig_o.clone()
+        for kk in range(K_eff):
+            sel = (lab == kk).nonzero().squeeze(1)
+            if sel.numel() == 0:
+                continue
+            dl = zs[sel] - zbar[kk]                             # (n_k,16)
+            Y = o[sel] - m_o[kk]                                # (n_k,D)
+            if int(sel.numel()) < grad_min_frames:
+                n_demoted += 1                                  # A_k = 0 (0차 강등)
+            else:
+                S = dl.T @ dl                                   # (16,16)
+                lam_r = ridge_rho * float(S.diagonal().sum()) / s.shape[1]
+                G = Y.T @ dl                                    # (D,16)
+                A[kk] = G @ torch.linalg.inv(
+                    S + lam_r * torch.eye(s.shape[1], device=o.device))
+                Y = Y - dl @ A[kk].T                            # 선형 잔차
+            sig_lin[kk] = Y.std(0, unbiased=False)
+        sig_o = sig_lin
     # σ 하한 (§2)
     sig_s = sig_s.clamp_min(1e-3 * float(s.std()))
     sig_o = sig_o.clamp_min(1e-3 * float(o.std()))
@@ -151,14 +183,26 @@ def build_codebook(s: torch.Tensor, o: torch.Tensor, K: int, seed: int,
     # 그러면 w@m 이 여러 중심의 평균이 되어 구조가 뭉개지고, 남은 분산은 대각 잡음이
     # 채워 d_eff 가 폭발한다 — R13 의 등방 실패 모드로 되돌아간다.
     # h_scale 로 대역폭을 좁힐 수 있게 열어 둔다(1.0 = 스펙 그대로).
+    # ★ c 와 h 는 커널 가중(softmax(−‖zs−c‖²/h²))용이다. L2_codebook_bayes 는 가중을
+    #   GMM 사후확률로 바꾸므로 그 팔에서는 **deprecated** — 파일에는 남긴다
+    #   (스키마 호환 + sanity 의 구가중 대비용).
     h = float(torch.cdist(zs, c).min(1).values.median().clamp_min(1e-6)) * h_scale
 
-    return {"h_scale": h_scale,
+    out = {"h_scale": h_scale,
             "pi": pi.cpu(), "mu_s": mu_s.cpu(), "sig_s": sig_s.cpu(),
             "c": c.cpu(), "m": m_o.cpu(), "sig_o": sig_o.cpu(),
             "mean_s": mean_s.cpu(), "std_s": std_s.cpu(), "h": h,
             "K_eff": K_eff, "N": N, "n_k": n_k.cpu(), "inertia": inertia,
             "n_merged": n_merged}
+    if grad:
+        out["A"] = A.half().cpu()                     # fp16 저장(~10MB), 연산은 fp32
+        out["zbar"] = ((mu_s - mean_s) / std_s).cpu()
+        out["ridge_rho"] = ridge_rho
+        out["n_demoted"] = n_demoted
+        out["var_ratio_cells"] = (stats_v1_var
+                                  / sig_o.pow(2).sum(1).clamp_min(1e-12)).cpu()
+        out["A_fro"] = A.flatten(1).norm(dim=1).cpu()
+    return out
 
 
 def sample_codebook(cb: dict, n: int, gen=None) -> tuple[torch.Tensor, torch.Tensor]:
@@ -172,6 +216,14 @@ def sample_codebook(cb: dict, n: int, gen=None) -> tuple[torch.Tensor, torch.Ten
     d2 = torch.cdist(z, c).pow(2)                          # (n, K)
     w = torch.softmax(-d2 / (cb["h"] ** 2), dim=1)
     o_mu = w @ m
+    if cb.get("A") is not None:
+        # õ_mean = Σ_j w_j (m_j + A_j δ_j)  —  δ_j = z − z̄_j
+        # 두 번째 항을 (B,K,16) -> (B,K·16) @ (K·16, D) 한 번의 matmul 로 접는다.
+        # (B,K,D) 중간 텐서를 만들지 않으므로 top-m 절단이 필요 없다.
+        A = cb["A"].float()                                   # (K,D,16)
+        d = z[:, None, :] - cb["zbar"][None]                  # (n,K,16)
+        u = (w[:, :, None] * d).reshape(z.shape[0], -1)       # (n, K*16)
+        o_mu = o_mu + u @ A.permute(0, 2, 1).reshape(-1, A.shape[1])
     o_sd = (w @ sig_o.pow(2)).clamp_min(0.0).sqrt()
     o = o_mu + o_sd * torch.randn(n, m.shape[1], device=m.device, generator=gen)
     return s, o
@@ -200,6 +252,9 @@ class L2CodebookAnchor:
         self.K = args.codebook_k
         self.n_pairs = args.n_pairs
         self.h_scale = args.h_scale
+        self.grad_enable = args.grad_enable
+        self.ridge_rho = args.ridge_rho
+        self.grad_min_frames = args.grad_min_frames
         self.lam_lvl = args.lambda_level
         self.xt_mode = args.xt_mode
         self.step = 0
@@ -216,8 +271,13 @@ class L2CodebookAnchor:
         self._xt_sanity = False
 
     def describe(self):
-        return (f"L2_codebook — (s,o) 코드북 앵커 K={self.K}, 수집 {self.n_pairs}쌍, "
+        return (f"L2_codebook{'+grad' if self.grad_enable else ''} — (s,o) 코드북 앵커 "
+                f"K={self.K}, 수집 {self.n_pairs}쌍, "
                 f"xt={self.xt_mode}, λ_lvl={self.lam_lvl}, 코드북 {len(self.books)}개")
+
+    def _sample(self, cb, n, gen=None):
+        """(s̃, õ). 파생 팔(L2_codebook_bayes)이 가중치 원천을 갈아 끼우는 지점."""
+        return sample_codebook(cb, n, gen)
 
     def reduce_level(self, x):
         if self.a.anchor_norm == "sum":
@@ -292,7 +352,7 @@ class L2CodebookAnchor:
         teach = self.teacher
         for j in sorted(self.books):
             cb = self.books[j]
-            s_t, o_t = sample_codebook(cb, n)                       # (n,16), (n,3072)
+            s_t, o_t = self._sample(cb, n)                          # (n,16), (n,3072)
             s_t = s_t.detach(); o_t = o_t.detach()
             bb = dict(batch)
             bb["observation.state"] = s_t.view(st_shape).to(batch["observation.state"].dtype)
@@ -362,7 +422,9 @@ class L2CodebookAnchor:
         o = self._res_o[:n].to(device)
         t0 = time.perf_counter()
         cb = build_codebook(s, o, self.K, seed=getattr(args, "seed", 42),
-                            h_scale=self.h_scale)
+                            h_scale=self.h_scale, grad=self.grad_enable,
+                            ridge_rho=self.ridge_rho,
+                            grad_min_frames=self.grad_min_frames)
         dt = time.perf_counter() - t0
         p = self.out / "codebooks" / f"codebook_task{k}.pt"
         torch.save({kk: vv for kk, vv in cb.items()}, p)
@@ -371,7 +433,12 @@ class L2CodebookAnchor:
             f"[L2CB] task {k} 코드북  N={cb['N']} (본 프레임 {self._seen})  "
             f"K_eff={cb['K_eff']} (병합 {cb['n_merged']})  "
             f"n_k min/med/max={int(nk.min())}/{int(nk.median())}/{int(nk.max())}  "
-            f"h={cb['h']:.4f}  {dt:.1f}s  {p.stat().st_size/1e6:.2f}MB")
+            f"h={cb['h']:.4f}  {dt:.1f}s  {p.stat().st_size/1e6:.2f}MB"
+            + ("" if not self.grad_enable else
+               f"  |  grad: 강등 {cb['n_demoted']}셀  "
+               f"‖A‖_F med/max={float(cb['A_fro'].median()):.2f}/"
+               f"{float(cb['A_fro'].max()):.2f}  "
+               f"분산비(0차/1차) med={float(cb['var_ratio_cells'].median()):.2f}"))
         self.books[k] = to_device_cb(cb, device)
 
         if k == 0 and not self._sanity_done:
@@ -386,6 +453,102 @@ class L2CodebookAnchor:
         self._res_s = self._res_o = self._res_id = None
         torch.cuda.empty_cache()
         logging.info(f"[L2CB] task {k} teacher 갱신 (코드북 {len(self.books)}개)")
+
+    def _extra_sanity(self, cb, cbd, s_real, o_real, device, W, X, r_real):
+        """파생 팔이 sanity 를 덧붙이는 지점. 기본은 없음."""
+        return []
+
+    # ── §4 기울기 실재 진단 (v2 전용) ───────────────────────────────────────
+    @torch.no_grad()
+    def _grad_sanity(self, cb, cbd, s_real, o_real, device, W, X, r_real):
+        L = ["", "── §4 기울기(A_k) 진단 ──"]
+        mean_s, std_s = cbd["mean_s"], cbd["std_s"]
+        zs = (s_real - mean_s) / std_s
+        lab = torch.cdist(zs, cbd["c"]).argmin(1)          # hard 배정
+        zbar, m, A = cbd["zbar"], cbd["m"], cbd["A"].float()
+        K = m.shape[0]
+
+        corrs, r2_0, r2_1, vr, anorm, resid0 = [], [], [], [], [], []
+        ss0 = ss1 = sst = 0.0
+        for kk in range(K):
+            sel = (lab == kk).nonzero().squeeze(1)
+            if sel.numel() < 20:
+                continue
+            d = zs[sel] - zbar[kk]
+            Y = o_real[sel] - m[kk]
+            # 1a. 셀 내 ‖Y‖ vs ‖δ‖ 상관
+            a_, b_ = Y.norm(dim=1), d.norm(dim=1)
+            corrs.append(float(((a_ - a_.mean()) * (b_ - b_.mean())).mean()
+                               / (a_.std(unbiased=False) * b_.std(unbiased=False)).clamp_min(1e-12)))
+            # 1b/1c. 셀 내 80/20
+            pm = torch.randperm(sel.numel(), device=device)
+            ntr = max(int(0.8 * sel.numel()), 16)
+            tr, te = pm[:ntr], pm[ntr:]
+            if te.numel() < 4:
+                continue
+            dt, Yt = d[tr], Y[tr]
+            S = dt.T @ dt
+            lam = cb.get("ridge_rho", 0.05) * float(S.diagonal().sum()) / d.shape[1]
+            Ak = (Yt.T @ dt) @ torch.linalg.inv(S + lam * torch.eye(d.shape[1], device=device))
+            m_tr = Yt.mean(0)
+            e0 = Y[te] - m_tr                              # 0차 예측 잔차
+            e1 = Y[te] - (m_tr + d[te] @ Ak.T)             # 1차 예측 잔차
+            ss0 += float(e0.pow(2).sum()); ss1 += float(e1.pow(2).sum())
+            sst += float((Y[te] - Yt.mean(0)).pow(2).sum())
+            vr.append(float(e0.pow(2).sum() / e1.pow(2).sum().clamp_min(1e-12)))
+            anorm.append(float((d[te] @ Ak.T).norm(dim=1).median()))
+            resid0.append(float(e0.norm(dim=1).median()))
+        import statistics as st
+        q = lambda v, p: float(torch.tensor(v).quantile(p))
+        R2_0 = 1 - ss0 / max(sst, 1e-12)
+        R2_1 = 1 - ss1 / max(sst, 1e-12)
+        gap = R2_1 - R2_0
+        vr_med = st.median(vr) if vr else 0.0
+        L.append(f"1a 셀내 corr(‖o−m‖,‖δ‖)  중앙값={st.median(corrs):.3f}  "
+                 f"Q1/Q3={q(corrs,0.25):.3f}/{q(corrs,0.75):.3f}  (양수 = 기울기 실재)")
+        L.append(f"1b held-out R²  0차={R2_0:.4f}  1차={R2_1:.4f}  gap={gap:+.4f}")
+        L.append(f"1c 셀별 분산비(0차/1차) 중앙값={vr_med:.3f}  "
+                 f"Q1/Q3={q(vr,0.25):.3f}/{q(vr,0.75):.3f}")
+        gate = (gap >= 0.05) or (vr_med >= 1.2)
+        L.append(f"   ★게이트: gap≥0.05 또는 분산비≥1.2 -> "
+                 f"{'통과 — 본 런 진행' if gate else '미달 — 본 런 보류'}")
+
+        # 2. d_eff 3열 (실측 / grad-õ / v1-õ)
+        def deff(x):
+            x = x - x.mean(0)
+            lam = torch.linalg.svdvals(x.double()).pow(2) / (x.shape[0] - 1)
+            return float(lam.sum() ** 2 / lam.pow(2).sum()), float(lam.sum())
+        cb_v1 = {kk: vv for kk, vv in cbd.items() if kk != "A"}
+        cb_v1["A"] = None
+        g = torch.Generator(device=device).manual_seed(1234)
+        s1, o1 = sample_codebook(cbd, 1000, g)
+        g = torch.Generator(device=device).manual_seed(1234)
+        s0, o0 = sample_codebook(cb_v1, 1000, g)
+        sel = torch.randperm(o_real.shape[0], device=device)[:1000]
+        dr, vrr = deff(o_real[sel]); dg, vg = deff(o1); dv, vv_ = deff(o0)
+        L += ["2 d_eff / total variance",
+              f"   {'':10}{'d_eff':>10}{'var':>12}{'d_eff 비':>10}",
+              f"   {'실측':10}{dr:10.2f}{vrr:12.1f}{1.0:10.2f}",
+              f"   {'grad-õ':10}{dg:10.2f}{vg:12.1f}{dg/dr:10.2f}"
+              f"   {'OK' if abs(dg/dr-1) <= 0.20 else '★±20% 이탈★'}",
+              f"   {'v1-õ':10}{dv:10.2f}{vv_:12.1f}{dv/dr:10.2f}"]
+
+        # 3. 서브셀 정합 (v1 sanity 의 ridge f(s) 재사용)
+        def rmse(ss, oo):
+            Xs = torch.cat([ss, torch.ones(ss.shape[0], 1, device=device)], 1).double()
+            return float((oo.double() - Xs @ W).pow(2).mean().sqrt())
+        rg, rv = rmse(s1, o1), rmse(s0, o0)
+        L += [f"3 서브셀 정합  RMSE(õ−f(s̃))  grad={rg:.4f}  v1={rv:.4f}  "
+              f"실측 잔차={r_real:.4f}",
+              f"   비(실측 대비)  grad={rg/max(r_real,1e-12):.2f}  v1={rv/max(r_real,1e-12):.2f}  "
+              f"({'개선' if rg < rv else '개선 없음'})"]
+
+        # 4. 외삽 안전
+        L.append(f"4 외삽 안전  ‖A_k δ‖ 중앙값={st.median(anorm):.4f}  "
+                 f"0차 잔차 중앙값={st.median(resid0):.4f}  "
+                 f"비={st.median(anorm)/max(st.median(resid0),1e-12):.3f} (<1 정상)")
+        self._grad_gate = gate
+        return L
 
     # ── Sanity (§5) — task0 종료 시 1회, 로그만 ─────────────────────────────
     @torch.no_grad()
@@ -492,6 +655,12 @@ class L2CodebookAnchor:
         L.append(f"5.3d 합성 정합  RMSE(õ−f(s̃))={r_syn:.4f}  실측 잔차 RMSE={r_real:.4f}  "
                  f"비={r_syn/max(r_real,1e-12):.2f} (1~2 기대)")
 
+        # ── §4 v2 기울기 sanity ────────────────────────────────────────
+        if self.grad_enable:
+            L += self._grad_sanity(cb, cbd, s_real, o_real, device, W, X, r_real)
+
+        L += self._extra_sanity(cb, cbd, s_real, o_real, device, W, X, r_real)
+
         # 5.4 teacher 스모크
         if self.teacher is not None:
             L.append("5.4 teacher 스모크  건너뜀 (teacher 는 이 뒤에 만들어진다)")
@@ -525,6 +694,10 @@ def main() -> None:
     ap.add_argument("--n_pairs", type=int, default=8000)
     ap.add_argument("--h_scale", type=float, default=1.0,
                     help="softmax 대역폭 배율. 1.0 = 스펙(최근접거리 중앙값)")
+    ap.add_argument("--grad_enable", action="store_true",
+                    help="셀별 선형 기울기 A_k 사용 (v2). 끄면 v1 과 동일 경로")
+    ap.add_argument("--ridge_rho", type=float, default=0.05)
+    ap.add_argument("--grad_min_frames", type=int, default=24)
     ap.add_argument("--xt_mode", choices=["teacher", "current"], default="teacher")
     ap.add_argument("--passthru", nargs=argparse.REMAINDER, default=[])
     args = ap.parse_args()
@@ -558,6 +731,8 @@ def main() -> None:
             "5. teacher 부트스트랩 x_t·λ·reduction·teacher 운용·eval 은 L2 와 동일.",
         ],
         "codebook_k": args.codebook_k, "n_pairs": args.n_pairs, "h_scale": args.h_scale,
+        "grad_enable": args.grad_enable, "ridge_rho": args.ridge_rho,
+        "grad_min_frames": args.grad_min_frames,
         "xt_mode": args.xt_mode, "lambda_level": args.lambda_level,
         "anchor_norm": args.anchor_norm, "chunk_backward": args.chunk_backward,
         "time_bin": "제거 (R10.compute_stats/phase_bins 를 예외로 차단)",
