@@ -7,11 +7,37 @@
     "task4": 90.0,
     "task5": 85.0,
     "task6": 90.0,
-    "task7": null,
-    "task8": null,
-    "task9": null
+    "task7": 75.0,
+    "task8": 85.0,
+    "task9": 90.0
   },
-  "note": "SR 칸에 결측이 있어 집계 지표를 내지 않는다",
+  "AvgSR_final": 92.5,
+  "BWT": 2.2222222222222223,
+  "Forgetting": {
+    "task0": 0.0,
+    "task1": 0.0,
+    "task2": 5.0,
+    "task3": 0.0,
+    "task4": 0.0,
+    "task5": 0.0,
+    "task6": 5.0,
+    "task7": 15.0,
+    "task8": 0.0,
+    "task9": 0.0
+  },
+  "Forgetting_mean": 2.5,
+  "final_row": {
+    "task0": 100.0,
+    "task1": 100.0,
+    "task2": 95.0,
+    "task3": 100.0,
+    "task4": 95.0,
+    "task5": 95.0,
+    "task6": 95.0,
+    "task7": 65.0,
+    "task8": 90.0,
+    "task9": 90.0
+  },
   "task_order": [
     0,
     1,

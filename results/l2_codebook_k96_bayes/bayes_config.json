@@ -1,0 +1,41 @@
+{
+  "arm": "L2_codebook_bayes",
+  "base": "L2_codebook(diag)",
+  "base_diff": [
+    "1. 앵커 가중치를 커널 softmax(−‖zs(s̃)−c‖²/h²) 에서 GMM 사후확률 r 로 교체.",
+    "2. r_j ∝ π_j N(s̃; μ_s,j, diag σ²_s,j) — 이미 저장 중인 통계만 쓴다. 새 파라미터 0.",
+    "3. 원시 s 공간에서 계산 — zs() 환승·c·h 가 가중 경로에서 사라진다.",
+    "4. 빌드는 무변경. c·h 는 파일에 남기되 이 팔에서는 deprecated(sanity 구가중 대비용).",
+    "5. grad 팔의 δ=(s̃−μ_s,j)/std_s 는 v3 구현과 이미 동일 — A_k 회귀식 변경 없음."
+  ],
+  "bayes_temp": 1.0,
+  "codebook_k": 96,
+  "n_pairs": 8000,
+  "grad_enable": false,
+  "ridge_rho": 0.05,
+  "grad_min_frames": 24,
+  "lambda_level": 3.0,
+  "chunk_backward": true,
+  "teacher": "rolling (1 snapshot)",
+  "p_drop": 0.0,
+  "guidance_w": 1.0,
+  "argv": [
+    "B1.py",
+    "--p_drop",
+    "0",
+    "--guidance_w",
+    "1.0",
+    "--lambda_anchor",
+    "1.0",
+    "--out_dir",
+    "results/l2_codebook_k96_bayes",
+    "--ckpt_root",
+    "/home/sa090180/clare/outputs/l2_codebook_k96_bayes",
+    "--num_tasks",
+    "10",
+    "--suite",
+    "libero_spatial",
+    "--num_workers",
+    "6"
+  ]
+}

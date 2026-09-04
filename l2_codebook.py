@@ -104,7 +104,8 @@ def kmeans(x: torch.Tensor, K: int, n_init: int = 10, iters: int = 100,
 def build_codebook(s: torch.Tensor, o: torch.Tensor, K: int, seed: int,
                    min_n: int = 5, h_scale: float = 1.0,
                    grad: bool = False, ridge_rho: float = 0.05,
-                   grad_min_frames: int = 24) -> dict:
+                   grad_min_frames: int = 24, full_cov_s: bool = False,
+                   cov_ridge: float = 0.05) -> dict:
     """(s(N,16), o(N,3072)) -> 코드북 dict. §2 그대로."""
     N = s.shape[0]
     mean_s, std_s = s.mean(0), s.std(0).clamp_min(1e-8)
@@ -143,6 +144,30 @@ def build_codebook(s: torch.Tensor, o: torch.Tensor, K: int, seed: int,
 
     mu_s, sig_s = per_cell(s, s.shape[1])
     m_o, sig_o = per_cell(o, o.shape[1])
+
+    # ── p(s|j) 를 완전 공분산으로 (full_cov_s) ──────────────────────────────
+    # 대각은 축 정렬 타원에서만 뽑아 관절 간 상관을 버린다. 실측(libero_spatial
+    # task0): 셀 안 state 상관 |r| 중앙값 0.333 — 무시할 수준이 아니다.
+    # state 는 16 차원뿐이라 완전 공분산이 136 개 파라미터이고 셀당 표본 48 개면
+    # 추정 가능하다(관측 3072 차원과 달리 랭크 부족이 없다). 저장도 셀당 16x16.
+    Ls = None
+    if full_cov_s:
+        Ds = s.shape[1]
+        Ls = torch.zeros(K_eff, Ds, Ds, device=s.device)
+        eye = torch.eye(Ds, device=s.device)
+        for kk in range(K_eff):
+            sel = (lab == kk).nonzero().squeeze(1)
+            if sel.numel() < 2:
+                Ls[kk] = torch.diag(sig_s[kk].clamp_min(1e-6))
+                continue
+            x = s[sel] - mu_s[kk]
+            C = (x.T @ x) / sel.numel()
+            # 얇은 셀에서 랭크가 모자라면 Cholesky 가 깨진다. 대각을 ridge 로 섞는다.
+            C = C + cov_ridge * torch.diag(torch.diag(C).clamp_min(1e-8)) + 1e-8 * eye
+            try:
+                Ls[kk] = torch.linalg.cholesky(C)
+            except Exception:
+                Ls[kk] = torch.diag(sig_s[kk].clamp_min(1e-6))
 
     # ── v2: 셀별 선형 기울기 A_k (3072x16) ──────────────────────────────────
     # v1 은 셀 안에서 o 가 s 를 따라 움직이는 성분을 m_k 하나로 뭉개고, 그 변동을
@@ -194,6 +219,9 @@ def build_codebook(s: torch.Tensor, o: torch.Tensor, K: int, seed: int,
             "mean_s": mean_s.cpu(), "std_s": std_s.cpu(), "h": h,
             "K_eff": K_eff, "N": N, "n_k": n_k.cpu(), "inertia": inertia,
             "n_merged": n_merged}
+    if Ls is not None:
+        out["L_s"] = Ls.cpu()
+        out["cov_ridge"] = cov_ridge
     if grad:
         out["A"] = A.half().cpu()                     # fp16 저장(~10MB), 연산은 fp32
         out["zbar"] = ((mu_s - mean_s) / std_s).cpu()
@@ -211,7 +239,10 @@ def sample_codebook(cb: dict, n: int, gen=None) -> tuple[torch.Tensor, torch.Ten
     c, m, sig_o = cb["c"], cb["m"], cb["sig_o"]
     k = torch.multinomial(pi, n, replacement=True, generator=gen)
     eps = torch.randn(n, mu_s.shape[1], device=mu_s.device, generator=gen)
-    s = mu_s[k] + sig_s[k] * eps
+    if cb.get("L_s") is not None:            # 완전 공분산: s = μ + L ε
+        s = mu_s[k] + torch.bmm(cb["L_s"][k], eps.unsqueeze(2)).squeeze(2)
+    else:                                     # 대각
+        s = mu_s[k] + sig_s[k] * eps
     z = (s - cb["mean_s"]) / cb["std_s"]
     d2 = torch.cdist(z, c).pow(2)                          # (n, K)
     w = torch.softmax(-d2 / (cb["h"] ** 2), dim=1)
@@ -255,6 +286,8 @@ class L2CodebookAnchor:
         self.grad_enable = args.grad_enable
         self.ridge_rho = args.ridge_rho
         self.grad_min_frames = args.grad_min_frames
+        self.full_cov_s = getattr(args, "full_cov_s", False)
+        self.cov_ridge = getattr(args, "cov_ridge", 0.05)
         self.lam_lvl = args.lambda_level
         self.xt_mode = args.xt_mode
         self.step = 0
@@ -271,7 +304,8 @@ class L2CodebookAnchor:
         self._xt_sanity = False
 
     def describe(self):
-        return (f"L2_codebook{'+grad' if self.grad_enable else ''} — (s,o) 코드북 앵커 "
+        return (f"L2_codebook{'+grad' if self.grad_enable else ''}"
+                f"{'+fullcov_s' if self.full_cov_s else ''} — (s,o) 코드북 앵커 "
                 f"K={self.K}, 수집 {self.n_pairs}쌍, "
                 f"xt={self.xt_mode}, λ_lvl={self.lam_lvl}, 코드북 {len(self.books)}개")
 
@@ -424,7 +458,8 @@ class L2CodebookAnchor:
         cb = build_codebook(s, o, self.K, seed=getattr(args, "seed", 42),
                             h_scale=self.h_scale, grad=self.grad_enable,
                             ridge_rho=self.ridge_rho,
-                            grad_min_frames=self.grad_min_frames)
+                            grad_min_frames=self.grad_min_frames,
+                            full_cov_s=self.full_cov_s, cov_ridge=self.cov_ridge)
         dt = time.perf_counter() - t0
         p = self.out / "codebooks" / f"codebook_task{k}.pt"
         torch.save({kk: vv for kk, vv in cb.items()}, p)
@@ -698,6 +733,9 @@ def main() -> None:
                     help="셀별 선형 기울기 A_k 사용 (v2). 끄면 v1 과 동일 경로")
     ap.add_argument("--ridge_rho", type=float, default=0.05)
     ap.add_argument("--grad_min_frames", type=int, default=24)
+    ap.add_argument("--full_cov_s", action="store_true",
+                    help="p(s|j) 를 대각 대신 완전 공분산으로 (s = μ + Lε)")
+    ap.add_argument("--cov_ridge", type=float, default=0.05)
     ap.add_argument("--xt_mode", choices=["teacher", "current"], default="teacher")
     ap.add_argument("--passthru", nargs=argparse.REMAINDER, default=[])
     args = ap.parse_args()
@@ -733,6 +771,7 @@ def main() -> None:
         "codebook_k": args.codebook_k, "n_pairs": args.n_pairs, "h_scale": args.h_scale,
         "grad_enable": args.grad_enable, "ridge_rho": args.ridge_rho,
         "grad_min_frames": args.grad_min_frames,
+        "full_cov_s": args.full_cov_s, "cov_ridge": args.cov_ridge,
         "xt_mode": args.xt_mode, "lambda_level": args.lambda_level,
         "anchor_norm": args.anchor_norm, "chunk_backward": args.chunk_backward,
         "time_bin": "제거 (R10.compute_stats/phase_bins 를 예외로 차단)",
