@@ -22,6 +22,8 @@ ARMS = [
     ("…+grad",        "l2_codebook_k96_grad",      "v3 — v1 + 셀별 선형 기울기 A_k (서브셀 결합)"),
     ("…+bayes",       "l2_codebook_k96_bayes",     "런 A — v1 + GMM 사후확률 가중 (커널 대체)"),
     ("…+grad+bayes",  "l2_codebook_k96_grad_bayes","런 B — v3 + GMM 사후확률 가중"),
+    ("…+fullcovS",    "l2cb_fullcov",              "v1 + p(s|j) 완전 공분산 (대각 아님)"),
+    ("…+fullcovS+grad","l2cb_fullcov_grad",        "v3 + p(s|j) 완전 공분산"),
 ]
 REF = [
     ("ER",  "ER_10task",           "과거 원시 데이터 사용 (상한 참조)", "tab"),

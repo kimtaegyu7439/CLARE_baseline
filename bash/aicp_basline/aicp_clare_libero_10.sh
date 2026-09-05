@@ -1,6 +1,6 @@
 export MUJOCO_GL=egl;
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-3};
-export MUJOCO_EGL_DEVICE_ID=${MUJOCO_EGL_DEVICE_ID:-$CUDA_VISIBLE_DEVICES};
+export MUJOCO_EGL_DEVICE_ID=${MUJOCO_EGL_DEVICE_ID:-${CUDA_VISIBLE_DEVICES}};
 SEED=${1:-42};
 
 # Sets HF_LEROBOT_HOME (dataset download dir), HF_HUB_CACHE (model download dir)
@@ -11,13 +11,13 @@ HF_ORG=continuallearning;
 
 STEPS=20000;
 LOG_STEPS=100;
-N_EVAL=50;
+N_EVAL=100;
 BS_EVAL=50;
 
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --seed=$SEED \
     --job_name=dit_flow_mt_cl_seed_${SEED}_libero_10_task_0_encoder_mlp_adapter_threshold_1_0 \
-    --output_dir=./outputs/aicp/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_0_encoder_mlp_adapter_threshold_1_0 \
+    --output_dir=./outputs/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_0_encoder_mlp_adapter_threshold_1_0 \
     --dataset.repo_id=continuallearning/libero_10_image_task_0 \
     --policy.path=${PRETRAIN_PATH} \
     --policy.push_to_hub=false \
@@ -53,7 +53,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --seed=$SEED \
     --job_name=dit_flow_mt_cl_seed_${SEED}_libero_10_task_1_encoder_mlp_adapter_threshold_1_0 \
-    --output_dir=./outputs/aicp/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_1_encoder_mlp_adapter_threshold_1_0 \
+    --output_dir=./outputs/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_1_encoder_mlp_adapter_threshold_1_0 \
     --dataset.repo_id=continuallearning/libero_10_image_task_1 \
     --policy.path=${PRETRAIN_PATH} \
     --policy.push_to_hub=false \
@@ -69,7 +69,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --eval_freq=200000 \
     --save_freq=$STEPS \
     --log_freq=$LOG_STEPS \
-    --peft_weight_path=./outputs/aicp/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_0_encoder_mlp_adapter_threshold_1_0/checkpoints/last/adapter \
+    --peft_weight_path=./outputs/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_0_encoder_mlp_adapter_threshold_1_0/checkpoints/last/adapter \
     --expand_threshold=1.0 \
     --detect_distribution_shift_steps=200 \
     --detect_distribution_shift_batch_size=32 \
@@ -89,7 +89,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --seed=$SEED \
     --job_name=dit_flow_mt_cl_seed_${SEED}_libero_10_task_2_encoder_mlp_adapter_threshold_1_0 \
-    --output_dir=./outputs/aicp/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_2_encoder_mlp_adapter_threshold_1_0 \
+    --output_dir=./outputs/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_2_encoder_mlp_adapter_threshold_1_0 \
     --dataset.repo_id=continuallearning/libero_10_image_task_2 \
     --policy.path=${PRETRAIN_PATH} \
     --policy.push_to_hub=false \
@@ -105,7 +105,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --eval_freq=200000 \
     --save_freq=$STEPS \
     --log_freq=$LOG_STEPS \
-    --peft_weight_path=./outputs/aicp/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_1_encoder_mlp_adapter_threshold_1_0/checkpoints/last/adapter \
+    --peft_weight_path=./outputs/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_1_encoder_mlp_adapter_threshold_1_0/checkpoints/last/adapter \
     --expand_threshold=1.0 \
     --detect_distribution_shift_steps=200 \
     --detect_distribution_shift_batch_size=32 \
@@ -125,7 +125,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --seed=$SEED \
     --job_name=dit_flow_mt_cl_seed_${SEED}_libero_10_task_3_encoder_mlp_adapter_threshold_1_0 \
-    --output_dir=./outputs/aicp/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_3_encoder_mlp_adapter_threshold_1_0 \
+    --output_dir=./outputs/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_3_encoder_mlp_adapter_threshold_1_0 \
     --dataset.repo_id=continuallearning/libero_10_image_task_3 \
     --policy.path=${PRETRAIN_PATH} \
     --policy.push_to_hub=false \
@@ -141,7 +141,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --eval_freq=200000 \
     --save_freq=$STEPS \
     --log_freq=$LOG_STEPS \
-    --peft_weight_path=./outputs/aicp/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_2_encoder_mlp_adapter_threshold_1_0/checkpoints/last/adapter \
+    --peft_weight_path=./outputs/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_2_encoder_mlp_adapter_threshold_1_0/checkpoints/last/adapter \
     --expand_threshold=1.0 \
     --detect_distribution_shift_steps=200 \
     --detect_distribution_shift_batch_size=32 \
@@ -161,7 +161,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --seed=$SEED \
     --job_name=dit_flow_mt_cl_seed_${SEED}_libero_10_task_4_encoder_mlp_adapter_threshold_1_0 \
-    --output_dir=./outputs/aicp/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_4_encoder_mlp_adapter_threshold_1_0 \
+    --output_dir=./outputs/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_4_encoder_mlp_adapter_threshold_1_0 \
     --dataset.repo_id=continuallearning/libero_10_image_task_4 \
     --policy.path=${PRETRAIN_PATH} \
     --policy.push_to_hub=false \
@@ -177,7 +177,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --eval_freq=200000 \
     --save_freq=$STEPS \
     --log_freq=$LOG_STEPS \
-    --peft_weight_path=./outputs/aicp/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_3_encoder_mlp_adapter_threshold_1_0/checkpoints/last/adapter \
+    --peft_weight_path=./outputs/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_3_encoder_mlp_adapter_threshold_1_0/checkpoints/last/adapter \
     --expand_threshold=1.0 \
     --detect_distribution_shift_steps=200 \
     --detect_distribution_shift_batch_size=32 \
@@ -197,7 +197,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --seed=$SEED \
     --job_name=dit_flow_mt_cl_seed_${SEED}_libero_10_task_5_encoder_mlp_adapter_threshold_1_0 \
-    --output_dir=./outputs/aicp/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_5_encoder_mlp_adapter_threshold_1_0 \
+    --output_dir=./outputs/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_5_encoder_mlp_adapter_threshold_1_0 \
     --dataset.repo_id=continuallearning/libero_10_image_task_5 \
     --policy.path=${PRETRAIN_PATH} \
     --policy.push_to_hub=false \
@@ -213,7 +213,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --eval_freq=200000 \
     --save_freq=$STEPS \
     --log_freq=$LOG_STEPS \
-    --peft_weight_path=./outputs/aicp/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_4_encoder_mlp_adapter_threshold_1_0/checkpoints/last/adapter \
+    --peft_weight_path=./outputs/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_4_encoder_mlp_adapter_threshold_1_0/checkpoints/last/adapter \
     --expand_threshold=1.0 \
     --detect_distribution_shift_steps=200 \
     --detect_distribution_shift_batch_size=32 \
@@ -233,7 +233,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --seed=$SEED \
     --job_name=dit_flow_mt_cl_seed_${SEED}_libero_10_task_6_encoder_mlp_adapter_threshold_1_0 \
-    --output_dir=./outputs/aicp/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_6_encoder_mlp_adapter_threshold_1_0 \
+    --output_dir=./outputs/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_6_encoder_mlp_adapter_threshold_1_0 \
     --dataset.repo_id=continuallearning/libero_10_image_task_6 \
     --policy.path=${PRETRAIN_PATH} \
     --policy.push_to_hub=false \
@@ -249,7 +249,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --eval_freq=200000 \
     --save_freq=$STEPS \
     --log_freq=$LOG_STEPS \
-    --peft_weight_path=./outputs/aicp/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_5_encoder_mlp_adapter_threshold_1_0/checkpoints/last/adapter \
+    --peft_weight_path=./outputs/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_5_encoder_mlp_adapter_threshold_1_0/checkpoints/last/adapter \
     --expand_threshold=1.0 \
     --detect_distribution_shift_steps=200 \
     --detect_distribution_shift_batch_size=32 \
@@ -269,7 +269,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --seed=$SEED \
     --job_name=dit_flow_mt_cl_seed_${SEED}_libero_10_task_7_encoder_mlp_adapter_threshold_1_0 \
-    --output_dir=./outputs/aicp/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_7_encoder_mlp_adapter_threshold_1_0 \
+    --output_dir=./outputs/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_7_encoder_mlp_adapter_threshold_1_0 \
     --dataset.repo_id=continuallearning/libero_10_image_task_7 \
     --policy.path=${PRETRAIN_PATH} \
     --policy.push_to_hub=false \
@@ -285,7 +285,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --eval_freq=200000 \
     --save_freq=$STEPS \
     --log_freq=$LOG_STEPS \
-    --peft_weight_path=./outputs/aicp/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_6_encoder_mlp_adapter_threshold_1_0/checkpoints/last/adapter \
+    --peft_weight_path=./outputs/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_6_encoder_mlp_adapter_threshold_1_0/checkpoints/last/adapter \
     --expand_threshold=1.0 \
     --detect_distribution_shift_steps=200 \
     --detect_distribution_shift_batch_size=32 \
@@ -305,7 +305,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --seed=$SEED \
     --job_name=dit_flow_mt_cl_seed_${SEED}_libero_10_task_8_encoder_mlp_adapter_threshold_1_0 \
-    --output_dir=./outputs/aicp/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_8_encoder_mlp_adapter_threshold_1_0 \
+    --output_dir=./outputs/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_8_encoder_mlp_adapter_threshold_1_0 \
     --dataset.repo_id=continuallearning/libero_10_image_task_8 \
     --policy.path=${PRETRAIN_PATH} \
     --policy.push_to_hub=false \
@@ -321,7 +321,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --eval_freq=200000 \
     --save_freq=$STEPS \
     --log_freq=$LOG_STEPS \
-    --peft_weight_path=./outputs/aicp/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_7_encoder_mlp_adapter_threshold_1_0/checkpoints/last/adapter \
+    --peft_weight_path=./outputs/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_7_encoder_mlp_adapter_threshold_1_0/checkpoints/last/adapter \
     --expand_threshold=1.0 \
     --detect_distribution_shift_steps=200 \
     --detect_distribution_shift_batch_size=32 \
@@ -341,7 +341,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
 python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --seed=$SEED \
     --job_name=dit_flow_mt_cl_seed_${SEED}_libero_10_task_9_encoder_mlp_adapter_threshold_1_0 \
-    --output_dir=./outputs/aicp/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_9_encoder_mlp_adapter_threshold_1_0 \
+    --output_dir=./outputs/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_9_encoder_mlp_adapter_threshold_1_0 \
     --dataset.repo_id=continuallearning/libero_10_image_task_9 \
     --policy.path=${PRETRAIN_PATH} \
     --policy.push_to_hub=false \
@@ -357,7 +357,7 @@ python ./lerobot_lsy/src/lerobot/scripts/clare.py \
     --eval_freq=200000 \
     --save_freq=$STEPS \
     --log_freq=$LOG_STEPS \
-    --peft_weight_path=./outputs/aicp/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_8_encoder_mlp_adapter_threshold_1_0/checkpoints/last/adapter \
+    --peft_weight_path=./outputs/libero_10/clare/dit_flow_mt_cl_seed_${SEED}_libero_10_task_8_encoder_mlp_adapter_threshold_1_0/checkpoints/last/adapter \
     --expand_threshold=1.0 \
     --detect_distribution_shift_steps=200 \
     --detect_distribution_shift_batch_size=32 \
