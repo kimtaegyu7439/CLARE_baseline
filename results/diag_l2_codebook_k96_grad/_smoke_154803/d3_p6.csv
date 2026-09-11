@@ -1,0 +1,4 @@
+task,delta,baseline,drop_rotate,drop_scale_worst,rotate_worse
+3,0.1,50.0,0.0,-50.0,True
+3,0.2,50.0,0.0,-50.0,True
+3,0.3,50.0,-50.0,-50.0,False

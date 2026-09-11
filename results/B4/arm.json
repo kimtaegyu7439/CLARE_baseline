@@ -1,0 +1,16 @@
+{
+  "arm": "B4",
+  "anchor": "query_point_conditional",
+  "lambda_a": 1.0,
+  "n_query": 512,
+  "pool": 4096,
+  "gain": false,
+  "w_max": 2.0,
+  "xt_mode": "current",
+  "passthru": [
+    "--out_dir",
+    "results/B4_N512",
+    "--ckpt_root",
+    "outputs/B4_N512"
+  ]
+}

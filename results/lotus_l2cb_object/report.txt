@@ -1,0 +1,44 @@
+======================================================================================
+LOTUS 셋팅 lifelong — libero_object  (L2_codebook v3 앵커)
+======================================================================================
+
+base phase   6 task joint, 200,000 step (체크포인트 재사용)
+lifelong     4 stage x 1 task x 10 demo, stage 당 10,000 step
+평가         칸당 20 rollout, eval seed 7
+코드북       K = 2 x demo  (base 50 demo -> 100, lifelong 10 demo -> 20), 전 프레임 수집(저수지 없음), ridge_rho=0.05, λ_lvl=3.0
+
+지표 (LIBERO 벤치마크 Liu et al. 2023 — L2_SR_matrix.txt 와 같은 정의)
+  FWT = mean_t R[배운 스테이지][t]                높을수록 좋음
+  NBT = mean_t mean_{k>배운} (FWT_t − R[k][t])    **낮을수록** 좋음
+  AUC = mean_t mean_{k>=배운} R[k][t]             높을수록 좋음
+  AvgSR = 마지막 행 평균
+
+--------------------------------------------------------------------------------------
+SR matrix   행 = 스테이지(0 = base 직후), 열 = 스위트 태스크
+--------------------------------------------------------------------------------------
+stage       t0    t1    t2    t3    t4    t5    t6    t7    t8    t9
+0           90   100   100    95    95    90                        
+1           90   100   100    80   100    90    70                  
+2           75    95    95    85   100    90    85    85            
+3          100    85    95    90   100    85    85    75   100      
+4           90    85   100   100   100    85    70    85    95    80
+--------------------------------------------------------------------------------------
+AvgSR 89.0   FWT↑ 90.5   NBT↓ +1.8   AUC↑ 89.4
+
+태스크별 (배운 스테이지 / 명령어)
+  t0  stage0  pick up the alphabet soup and place it in the basket
+  t1  stage0  pick up the cream cheese and place it in the basket
+  t2  stage0  pick up the salad dressing and place it in the basket
+  t3  stage0  pick up the bbq sauce and place it in the basket
+  t4  stage0  pick up the ketchup and place it in the basket
+  t5  stage0  pick up the tomato sauce and place it in the basket
+  t6  stage1  pick up the butter and place it in the basket
+  t7  stage2  pick up the milk and place it in the basket
+  t8  stage3  pick up the chocolate pudding and place it in the basket
+  t9  stage4  pick up the orange juice and place it in the basket
+
+주의
+  · 칸당 20 rollout 이라 이항 표준오차가 개별 칸 최대 ±11%p 다. 행/열 평균으로 읽어야 한다.
+  · base 6 태스크는 joint 로 배웠으므로 stage 0 이 그 6개의 FWT 다.
+  · 앵커는 청크 backward 라 과거 태스크 수에 비례해 실효 가중이 커진다.
+

@@ -1,0 +1,12 @@
+{
+  "arm": "B6",
+  "anchor": "self_rollout_large_N",
+  "lambda_a": 1.0,
+  "n_query": 16,
+  "n_seeds": 4,
+  "n_waypoints": 8,
+  "ode_steps": 20,
+  "pool": 128,
+  "note": "B5 와 N 만 다름",
+  "passthru": []
+}

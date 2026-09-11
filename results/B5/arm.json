@@ -1,0 +1,11 @@
+{
+  "arm": "B5",
+  "anchor": "self_rollout",
+  "lambda_a": 1.0,
+  "n_query": 32,
+  "n_seeds": 4,
+  "n_waypoints": 8,
+  "ode_steps": 100,
+  "pool": 2048,
+  "passthru": []
+}

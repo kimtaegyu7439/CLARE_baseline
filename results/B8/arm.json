@@ -1,0 +1,19 @@
+{
+  "arm": "B8",
+  "anchor": "conflict_weighted",
+  "lambda_a": 1.0,
+  "w_min": 0.1,
+  "w_max": 5.0,
+  "passthru": [
+    "--lambda_anchor",
+    "10",
+    "--p_drop",
+    "0",
+    "--anchor_agg",
+    "sum",
+    "--out_dir",
+    "results/mod0/B8_lam10",
+    "--ckpt_root",
+    "outputs/mod0/B8_lam10"
+  ]
+}

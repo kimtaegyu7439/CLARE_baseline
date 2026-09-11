@@ -1,0 +1,25 @@
+Loading weights from local directory
+[K10gate] arm=wit w=(1.0, 0.0)  M=40  r=32  bins=[2, 5, 8]  n=256
+[K10gate] net=/home/sa090180/clare/outputs/K5_spatial_10task_smoke_M8/libero_spatial_seed42_ours/task_0/checkpoints/last/pretrained_model
+[K10gate] ℓ_0='pick up the black bowl between the plate and the ramekin and place it on the plate'
+[K10gate] emb_cache=results/K0/emb_cache/libero_spatial_task0.pt  (4718, 4, 768)
+[K10gate] blocks=[0, 1, 2, 3, 4, 5]  eps_probe(1, 16, 7)
+[K10gate] wstats 수집 0.5s -> results/K10/wstats_snapshot_task0.pt
+[K10gate] PCA 계산 -> results/K10/pca_task0.pt  (r=32)
+[K10gate] bin2  Ê 상수 wit=0.0031749 U=0.12322  d_real=26.28  가우시안 d̂=1.643
+[K10gate] bin5  Ê 상수 wit=0.0049906 U=0.046756  d_real=22.66  가우시안 d̂=2.036
+[K10gate] bin8  Ê 상수 wit=0.0070956 U=0.1864  d_real=24.00  가우시안 d̂=1.867
+[K10gate] wit|T0|collective|bin2  d̂ 1.296->1.249  div 0.990  Ê_wit 29.156->5.542  Ê_U 0.969->1.015  (2s)
+           η=77.86 (target RMS 0.06261)  E 첫10 42.2 22.4 18.3 17 16.1 15.3 14.6 14 13.5 13.1
+[K10gate] wit|T0|collective|bin5  d̂ 1.576->1.530  div 0.997  Ê_wit 22.391->28.123  Ê_U 1.330->1.025  (2s)
+           η=119.7 (target RMS 0.06318)  E 첫10 36.1 19.1 19 21.3 25.7 40.1 54.5 115 112 242
+[K10gate] wit|T0|collective|bin8  d̂ 1.480->1.397  div 0.981  Ê_wit 11.144->11.411  Ê_U 1.006->0.993  (2s)
+           η=156.9 (target RMS 0.06257)  E 첫10 25.5 18.4 15.7 14.4 13.8 13.9 14.9 18.4 23.8 39.1
+[K10gate] wit|const|collective|bin2  diverged
+[K10gate] wit|const|collective|bin5  diverged
+[K10gate] wit|const|collective|bin8  diverged
+[K10gate] wit|anneal|collective|bin2  diverged
+[K10gate] wit|anneal|collective|bin5  diverged
+[K10gate] wit|anneal|collective|bin8  diverged
+
+[K10gate] wit 완료 0.4분 -> results/K10/gpu1/partial.json

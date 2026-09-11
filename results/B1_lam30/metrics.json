@@ -1,0 +1,35 @@
+{
+  "learning_sr": {
+    "task0": 100.0,
+    "task1": 70.0,
+    "task2": 100.0,
+    "task3": 95.0
+  },
+  "AvgSR_final": 58.75,
+  "BWT": -43.333333333333336,
+  "Forgetting": {
+    "task0": 55.0,
+    "task1": 70.0,
+    "task2": 5.0,
+    "task3": 0.0
+  },
+  "Forgetting_mean": 32.5,
+  "final_row": {
+    "task0": 45.0,
+    "task1": 0.0,
+    "task2": 95.0,
+    "task3": 95.0
+  },
+  "config": {
+    "mode": "ours",
+    "p_drop": 0.1,
+    "lambda_anchor": 30.0,
+    "suite": "libero_spatial",
+    "num_tasks": 4,
+    "steps_per_task": 5000,
+    "episodes_per_task": 45,
+    "eval_episodes": 20,
+    "seed": 42,
+    "guidance_w": 1.0
+  }
+}

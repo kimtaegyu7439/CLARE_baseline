@@ -1,0 +1,4 @@
+# task_order: 0,1
+after_stage,stage0(task0),stage1(task1)
+0,100.0,
+1,50.0,50.0

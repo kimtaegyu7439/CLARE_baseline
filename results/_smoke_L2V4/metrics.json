@@ -1,0 +1,61 @@
+{
+  "suite": "goal",
+  "R": [
+    [
+      100.0,
+      100.0,
+      100.0,
+      100.0,
+      100.0,
+      100.0,
+      null
+    ],
+    [
+      100.0,
+      100.0,
+      50.0,
+      100.0,
+      100.0,
+      100.0,
+      0.0
+    ]
+  ],
+  "learned_at": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1
+  ],
+  "stage_tasks": [
+    [
+      6
+    ]
+  ],
+  "env_task": {
+    "0": "Libero_Goal_Task_0",
+    "1": "Libero_Goal_Task_1",
+    "2": "Libero_Goal_Task_2",
+    "3": "Libero_Goal_Task_3",
+    "4": "Libero_Goal_Task_4",
+    "5": "Libero_Goal_Task_5",
+    "6": "Libero_Goal_Task_6"
+  },
+  "metrics": {
+    "AvgSR": 78.57142857142857,
+    "FWT": 85.71428571428571,
+    "NBT": 8.333333333333334,
+    "AUC": 82.14285714285714
+  },
+  "instructions": {
+    "0": "open the middle drawer of the cabinet",
+    "1": "put the bowl on the stove",
+    "2": "put the wine bottle on top of the cabinet",
+    "3": "open the top drawer and put the bowl inside",
+    "4": "put the bowl on top of the cabinet",
+    "5": "push the plate to the front of the stove",
+    "6": "put the cream cheese in the bowl"
+  }
+}

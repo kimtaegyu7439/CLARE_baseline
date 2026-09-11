@@ -1,0 +1,302 @@
+# CLARE: Continual Learning for Vision-Language-Action Models via Autonomous Adapter Routing and Expansion
+
+[Ralf Römer](https://ralfroemer.com)<sup>1,\*</sup>,
+[Yi Zhang](https://www.linkedin.com/in/yi-zhang-01a8aa245/)<sup>1,\*</sup>,
+[Yuming Li](https://www.linkedin.com/in/yuming-li-6970792b1/)<sup>1</sup>,
+[Angela P. Schoellig](https://www.dynsyslab.org/prof-angela-schoellig/)<sup>1,2,3</sup>,
+
+<sup>1</sup>Technical University of Munich
+<sup>2</sup>Munich Center for Machine Learning
+<sup>3</sup>Robotics Institute Germany
+
+[![arXiv](https://img.shields.io/badge/arXiv-2601.09512-red)](https://arxiv.org/abs/2601.09512)
+[![Website](https://img.shields.io/badge/Website-CLARE-blue)](https://tum-lsy.github.io/clare/)
+[![Hugging Face](https://img.shields.io/badge/🤗%20Hugging%20Face-Models%20%26%20Datasets-yellow)](https://huggingface.co/continuallearning)
+[![PyTorch](https://img.shields.io/badge/Python-PyTorch-orange.svg)](https://www.pytorch.org)
+
+The official code repository for *"CLARE: Continual Learning for Vision-Language-Action Models via Autonomous Adapter Routing and Expansion"*.
+
+<p align="center">
+  <img src="clare_overview.png" alt="CLARE" width="50%"/>
+</p>
+
+> Abstract: To teach robots complex manipulation tasks, it is now a common practice to fine-tune a pre-trained vision-language-action model (VLA) on task-specific data. However, since this recipe updates existing representations, it is unsuitable for long-term operation in the real world, where robots must continually adapt to new tasks and environments while retaining the knowledge they have already acquired. Existing continual learning methods for robotics commonly require storing previous data (exemplars), struggle with long task sequences, or rely on task identifiers for deployment. To address these limitations, we propose CLARE, a general, parameter-efficient framework for non-exemplar continual learning with VLAs. CLARE introduces lightweight modular adapters into selected feedforward layers and autonomously expands the model only where necessary when learning a new task, guided by layer-wise feature similarity. During deployment, an autoencoder-based routing mechanism dynamically activates the most relevant adapters without requiring task labels. Through extensive experiments on the LIBERO benchmark, we show that CLARE achieves high performance on new tasks without catastrophic forgetting of earlier tasks, significantly outperforming even exemplar-based methods.
+
+## Project Structure
+
+This codebase is built on top of two open-source frameworks from Hugging Face:
+
+- **`lerobot_lsy/`**: Modified version of [LeRobot](https://github.com/huggingface/lerobot) for designing, training, and fine-tuning Vision-Language-Action (VLA) models
+- **`peft_lsy/`**: Modified version of [PEFT](https://github.com/huggingface/peft) implementing the CLARE algorithm as a LoRA-compatible adapter
+
+## Pre-trained Checkpoints & Datasets
+
+We provide pre-trained model checkpoints and LIBERO datasets on 🤗 Hugging Face: **[huggingface.co/continuallearning](https://huggingface.co/continuallearning)**
+
+Available resources:
+- **`dit_flow_mt_libero_90_pretrain`**: Base VLA checkpoint pretrained on LIBERO-90 as described in the paper
+- **`libero_10_image_task_0` to `libero_10_image_task_9`**: LIBERO-10 benchmark datasets (Goal, Spatial, Object also available)
+
+> Earlier revisions of this README pointed at `dit_flow_mt_libero_90_pretrain_new`, which is
+> not publicly readable (Hugging Face answers `401` for it). Use
+> `dit_flow_mt_libero_90_pretrain` — same `ditflow_mt` policy type, pretrained on LIBERO-90.
+> If you have been granted access to the private repo, run `hf auth login` and set
+> `PRETRAIN_REPO` in [`bash/clare/env.sh`](bash/clare/env.sh).
+
+## Installation
+
+### Prerequisites
+- Python 3.8+
+- CUDA-compatible GPU (recommended)
+- Conda or Miniconda
+
+### Setup
+
+1. **Create and activate a conda environment**
+   ```bash
+   conda create -n clare python=3.10
+   conda activate clare
+   ```
+
+2. **Install PEFT-LSY in editable mode**
+   ```bash
+   cd peft_lsy
+   pip install -e .
+   cd ..
+   ```
+
+3. **Install LeRobot-LSY in editable mode**
+   ```bash
+   cd lerobot_lsy
+   pip install -e .
+   cd ..
+   ```
+
+4. **Install additional dependencies** (if needed)
+   ```bash
+   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+   ```
+
+5. **Configure where datasets and models are stored**
+
+   All download locations live in [`bash/clare/env.sh`](bash/clare/env.sh), which every
+   training script sources. Edit the two roots at the top of that file:
+
+   ```bash
+   export CLARE_DATA_ROOT=/home/sa090180/Datasets   # LIBERO datasets
+   export CLARE_MODEL_ROOT=/home/sa090180/Models    # checkpoints + HF backbones
+   ```
+
+   These drive the variables the underlying libraries actually read:
+
+   | Variable | Default | What lands there |
+   | --- | --- | --- |
+   | `HF_LEROBOT_HOME` | `$CLARE_DATA_ROOT/lerobot` | LIBERO task datasets, under `<repo_id>/` |
+   | `HF_HUB_CACHE` | `$CLARE_MODEL_ROOT/hf_hub` | CLIP text encoder + ViT backbone pulled by `from_pretrained()` |
+   | `TORCH_HOME` | `$CLARE_MODEL_ROOT/torch` | torch.hub weights |
+   | `PRETRAIN_REPO` | `continuallearning/dit_flow_mt_libero_90_pretrain` | Which checkpoint to download |
+   | `PRETRAIN_PATH` | `$CLARE_MODEL_ROOT/dit_flow_mt_libero_90_pretrain` | Pretrained VLA checkpoint (`--policy.path`) |
+   | `CHECKPOINT_ROOT` | `./outputs` | Training outputs |
+
+   Any of them can also be overridden per-run: `HF_LEROBOT_HOME=/other/path bash bash/clare/clare_libero_spatial.sh`.
+
+6. **Download the checkpoint and datasets**
+
+   ```bash
+   bash bash/clare/download_assets.sh libero_spatial      # or libero_10 / libero_goal / libero_object
+   ```
+
+   Training also downloads anything missing on first run, so this step is optional —
+   it just lets you fetch everything up front.
+
+## PEFT Configuration
+
+CLARE uses a custom PEFT adapter configuration. Below is an example configuration for the CLARE adapter:
+
+```json
+{
+  "peft_type": "CLARE",
+  "task_type": null,
+  "auto_mapping": {
+    "base_model_class": "PeftWrapperPolicy",
+    "parent_library": "__main__"
+  },
+  "base_model_name_or_path": null,
+  "revision": null,
+  "target_modules": ".*velocity_net.cond_proj",
+  "inference_mode": true,
+  "batch_first": true,
+  "num_learned_task": 0,
+  "feature_dim": 2576,
+  "out_feature_dim": 512,
+  "use_trainable_copy": false,
+  "add_zero_init_conv_layer": false,
+  "structure": {},
+  "discriminator_cfg": {
+    "type": "autoencoder",
+    "batch_first": true,
+    "feature_dim": 2576,
+    "feature_fusion": false,
+    "fused_feature_dim": null,
+    "hidden_dim": 256,
+    "latent_dim": 128,
+    "num_tokens": 16,
+    "lora_rank": 32,
+    "lora_alpha": 32,
+    "use_lora": false,
+    "use_momentum": true,
+    "momentum": 0.1,
+    "max_batches_tracked": 2000
+  },
+  "func_adapter_cfg": {
+    "hidden_dim": 1024,
+    "lora_rank": 32,
+    "lora_alpha": 32,
+    "use_lora": false
+  }
+}
+```
+
+### Key Configuration Parameters
+
+- **`target_modules`**: Regular expression pattern matching the model layers where adapters will be applied
+- **`feature_dim`**: Dimension of input features for the adapter
+- **`out_feature_dim`**: Output dimension after adapter transformation
+- **`discriminator_cfg`**: Configuration for the autoencoder-based routing mechanism
+  - `type`: Type of discriminator (autoencoder or other)
+  - `hidden_dim`: Hidden layer dimension
+  - `latent_dim`: Latent space dimension for the autoencoder
+  - `use_momentum`: Whether to use momentum for feature statistics
+- **`func_adapter_cfg`**: Configuration for functional adapter modules
+- **`num_learned_task`**: Number of tasks learned so far
+
+## Usage
+
+### Training with CLARE on LIBERO Benchmark
+
+The main training script is located at `lerobot_lsy/src/lerobot/scripts/clare.py`. Below is an example command for the first stage of continual learning on LIBERO-10:
+
+```bash
+source bash/clare/env.sh   # sets HF_LEROBOT_HOME, HF_HUB_CACHE, PRETRAIN_PATH
+
+python ./lerobot_lsy/src/lerobot/scripts/clare.py \
+    --seed=42 \
+    --job_name=clare_libero_10_task_0 \
+    --output_dir=./outputs/libero_10/clare/dit_flow_mt_cl_seed_42_libero_10_task_0 \
+    --dataset.repo_id=continuallearning/libero_10_image_task_0 \
+    --policy.path=${PRETRAIN_PATH} \
+    --policy.push_to_hub=false \
+    --batch_size=32 \
+    --num_workers=16 \
+    --steps=20000 \
+    --env.type=libero \
+    --env.benchmark=libero_10 \
+    --env.task=Libero_10_Task_0 \
+    --eval.batch_size=50 \
+    --eval.n_episodes=100 \
+    --eval.max_episodes_rendered=4 \
+    --eval_freq=200000 \
+    --save_freq=20000 \
+    --log_freq=100 \
+    --peft_cfg_path=./peft_lsy/peft_config/clare_dit_flow_encoder_adapter \
+    --expand_threshold=1.0 \
+    --detect_distribution_shift_steps=200 \
+    --detect_distribution_shift_batch_size=32 \
+    --detect_distribution_shift_num_workers=16 \
+    --detect_distribution_shift_log_freq=10 \
+    --train_discriminators_steps=2000 \
+    --train_discriminators_batch_size=32 \
+    --train_discriminators_num_workers=16 \
+    --train_discriminators_log_freq=50 \
+    --train_discriminators_eval_freq=2000 \
+    --train_discriminators_save_freq=2000 \
+    --wandb.enable=true \
+    --wandb.disable_artifact=true \
+    --wandb.project=clare_experiments \
+    --wandb.entity=<your-wandb-entity>
+```
+
+To run a full continual learning experiment, use the provided bash scripts. Set your W&B entity first, then run:
+
+```bash
+# LIBERO-10 (10 tasks)
+bash bash/clare/clare_libero_10.sh
+
+# LIBERO-Goal (10 tasks)
+bash bash/clare/clare_libero_goal.sh
+
+# LIBERO-Spatial (10 tasks)
+bash bash/clare/clare_libero_spatial.sh
+
+# LIBERO-40 (4 suites × 10 tasks)
+bash bash/clare/clare_libero_40_10_goal_spatial_object.sh
+```
+
+Each script runs the full task sequence sequentially, passing the previous stage's adapter checkpoint to the next stage.
+
+### Key Training Arguments
+
+#### Dataset & Model
+- `--dataset.repo_id`: Hugging Face dataset repository ID
+- `--policy.path`: Path to the pre-trained VLA model (local path or HuggingFace repo ID)
+
+#### Training Configuration
+- `--batch_size`: Training batch size
+- `--num_workers`: Number of data loading workers
+- `--steps`: Total training steps
+- `--seed`: Random seed for reproducibility
+
+#### CLARE-Specific Parameters
+- `--peft_cfg_path`: Path to the PEFT configuration JSON file
+- `--expand_threshold`: Threshold for autonomous adapter expansion (based on feature similarity)
+- `--detect_distribution_shift_steps`: Steps for distribution shift detection
+- `--train_discriminators_steps`: Training steps for the autoencoder-based routing mechanism
+
+#### Evaluation
+- `--env.type`: Environment type (e.g., `libero`)
+- `--env.benchmark`: Benchmark suite (e.g., `libero_10`, `libero_goal`, `libero_spatial`)
+- `--env.task`: Comma-separated list of task names seen so far (e.g., `Libero_10_Task_0,Libero_10_Task_1`)
+- `--eval.n_episodes`: Number of evaluation episodes
+- `--eval_freq`: Frequency of evaluation (in training steps)
+
+#### Logging
+- `--wandb.enable`: Enable Weights & Biases logging
+- `--wandb.project`: W&B project name
+- `--log_freq`: Logging frequency
+
+## Evaluation
+
+You can run evaluations in LIBERO by either directly using the latest LeRobot version, which includes LIBERO, or by installing LIBERO separately:
+```bash
+cd ..
+git clone git@github.com:ZhangYi1999/gym-libero.git
+cd gym-libero
+pip install -e .
+python test/test_gym_libero.py  # Validate installation
+```
+
+## Citation
+
+If you find this work useful, please consider citing our paper:
+
+```bibtex
+@article{clare,
+  title={CLARE: Continual Learning for Vision-Language-Action Models via Autonomous Adapter Routing and Expansion},
+  author={Ralf R{\"o}mer and Yi Zhang and Yuming Li and Angela P. Schoellig},
+  journal={IEEE Robotics and Automation Letters (RA-L)},
+  year={2026}
+}
+```
+
+## License
+
+This project is released under the same license as the original LeRobot and PEFT frameworks.
+
+## Acknowledgments
+
+This work builds upon:
+- [LeRobot](https://github.com/huggingface/lerobot) by Hugging Face
+- [PEFT](https://github.com/huggingface/peft) by Hugging Face
+- [LIBERO](https://github.com/Lifelong-Robot-Learning/LIBERO) by Bo Liu et al.
+
+We thank the authors of these projects for their open-source contributions.

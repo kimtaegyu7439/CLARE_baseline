@@ -1,0 +1,21 @@
+{
+  "learning_sr": {
+    "task0": 95.0,
+    "task1": null,
+    "task2": null,
+    "task3": null
+  },
+  "note": "SR 칸에 결측이 있어 집계 지표를 내지 않는다",
+  "config": {
+    "mode": "ours",
+    "p_drop": 0.1,
+    "lambda_anchor": 1.0,
+    "suite": "libero_spatial",
+    "num_tasks": 4,
+    "steps_per_task": 5000,
+    "episodes_per_task": 45,
+    "eval_episodes": 20,
+    "seed": 42,
+    "guidance_w": 1.0
+  }
+}

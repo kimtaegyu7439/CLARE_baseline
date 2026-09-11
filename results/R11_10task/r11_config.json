@@ -1,0 +1,32 @@
+{
+  "arm": "R11",
+  "base": "R10",
+  "lambda_level": 3.0,
+  "rho": 1.0,
+  "n_bins": 10,
+  "n_white": 256,
+  "anchor_norm": "mean",
+  "struct_norm": "L1",
+  "chunk_backward": true,
+  "teacher": "rolling (1 snapshot)",
+  "embedding": "dinov2_cls_768_frozen",
+  "p_drop": 0.0,
+  "guidance_w": 1.0,
+  "argv": [
+    "B1.py",
+    "--p_drop",
+    "0",
+    "--guidance_w",
+    "1.0",
+    "--lambda_anchor",
+    "1.0",
+    "--out_dir",
+    "results/R11_10task",
+    "--ckpt_root",
+    "/home/sa090180/clare/outputs/R11",
+    "--num_tasks",
+    "10",
+    "--ckpt_root",
+    "outputs/R11_10task"
+  ]
+}

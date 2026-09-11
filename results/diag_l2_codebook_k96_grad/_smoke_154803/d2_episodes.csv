@@ -1,0 +1,5 @@
+success,stage,t_close,d_close,near_other,task,ckpt,ckpt_stage,seed,steps
+True,,,,False,3,diag,3,41,105
+True,,,,False,3,diag,3,42,105
+True,,,,False,3,final,8,41,86
+True,,,,False,3,final,8,42,86

@@ -1,0 +1,398 @@
+#!/usr/bin/env python
+"""results/SUMMARY.txt 생성 — 가설 계보와 실험 결과의 전체 기록.
+
+숫자는 실행 산출물에서 직접 읽는다. 진행 중인 팔은 있는 칸까지만 표시한다.
+실행이 끝날 때마다 다시 돌리면 갱신된다.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent
+N = 4
+
+ARMS = [
+    ("seq-FT", "outputs/E0/libero_spatial/seed_42/e0_results.jsonl", "jsonl:0"),
+    ("B1",     "results/B1/sr_matrix.csv",  "csv"),
+    ("B2",     "results/B2/sr_matrix.csv",  "csv"),
+    ("B3",     "results/B3/sr_matrix.csv",  "csv"),
+    ("B4",     "results/B4/sr_matrix.csv",  "csv"),
+    ("B5",     "results/B5/sr_matrix.csv",  "csv"),
+    ("B6",     "results/B6/sr_matrix.csv",  "csv"),
+    ("B4N512", "results/B4_N512/sr_matrix.csv", "csv"),
+    ("B7",     "results/B7/sr_matrix.csv",  "csv"),
+    ("B1λ3",   "results/B1_lam3/sr_matrix.csv",  "csv"),
+    ("B1λ10",  "results/B1_lam10/sr_matrix.csv", "csv"),
+    ("B1λ30",  "results/B1_lam30/sr_matrix.csv", "csv"),
+    ("B2λ3",   "results/B2_lam3/sr_matrix.csv",  "csv"),
+    ("B2λ10",  "results/B2_lam10/sr_matrix.csv", "csv"),
+    ("B2λ30",  "results/B2_lam30/sr_matrix.csv", "csv"),
+    ("B8λ3",   "results/B8_lam3/sr_matrix.csv",  "csv"),
+    ("B8λ10",  "results/B8_lam10/sr_matrix.csv", "csv"),
+    ("B9",     "results/B9_1023/sr_matrix_bytask.csv", "csv"),
+    ("ER",     "results/ER_task0123/er_results.jsonl", "jsonl:er"),
+]
+
+
+def load(path, kind):
+    p = REPO / path
+    c = {}
+    if not p.exists():
+        return c
+    if kind.startswith("jsonl"):
+        tag = kind.split(":", 1)[1]
+        for line in p.read_text().splitlines():
+            r = json.loads(line)
+            if r.get("run_tag") == tag and r.get("sr") is not None:
+                c[(r["stage"], r["probe_task"])] = float(r["sr"])
+    else:
+        for line in p.read_text().splitlines():
+            # 첫 줄이 '# task_order: ...' 주석일 수 있고 그다음이 헤더다
+            if not line or line.startswith("#") or not line.split(",")[0].strip().isdigit():
+                continue
+            f = line.split(",")
+            for t, v in enumerate(f[1:]):
+                if v.strip():
+                    c[(int(f[0]), t)] = float(v)
+    return {k: v for k, v in c.items() if k[0] < N and k[1] < N}
+
+
+def _order_of(path: str) -> list[int]:
+    p = REPO / path
+    if p.exists():
+        first = p.read_text().splitlines()[0]
+        if first.startswith("#") and "task_order:" in first:
+            tok = first.split("task_order:")[1].split()[0]
+            return [int(x) for x in tok.split(",")]
+    return list(range(N))
+
+
+def metrics(c, order=None):
+    order = order or list(range(N))
+    pos = {t: i for i, t in enumerate(order)}
+    last = [c.get((N - 1, t)) for t in range(N)]
+    diag = [c.get((pos[t], t)) for t in range(N)]
+    if any(v is None for v in last + diag):
+        return None
+    return (sum(last) / N,
+            sum(last[t] - diag[t] for t in range(N - 1)) / (N - 1),
+            sum(diag) / N)
+
+
+def stage_avg(c, k):
+    row = [c.get((k, t)) for t in range(k + 1)]
+    return sum(row) / len(row) if all(v is not None for v in row) else None
+
+
+def fmt(v, w=6, p=1):
+    return f"{v:{w}.{p}f}" if v is not None else f"{'—':>{w}}"
+
+
+def main():
+    D = {name: load(path, kind) for name, path, kind in ARMS}
+    O = {name: (_order_of(path) if kind == "csv" else list(range(N)))
+         for name, path, kind in ARMS}
+    L = []
+    A = L.append
+
+    A("=" * 96)
+    A("CLARE / B-시리즈 실험 요약 — 조건부 앵커링으로 catastrophic forgetting 을 막을 수 있는가")
+    A("=" * 96)
+    A("")
+    A("대상   libero_spatial task 0..3 순차 continual learning")
+    A("공통   5000 steps/task, 45 에피소드(뒤 5개 hold-out), batch 32, seed 42,")
+    A("       백본 dit_flow_mt_libero_90_pretrain, 스테이지 k>0 은 k-1 체크포인트에서 이어받음")
+    A("평가   칸당 20 롤아웃, start_seed 42 (E0 프로토콜과 동일)")
+    A("")
+
+    A("-" * 96)
+    A("0. 출발점")
+    A("-" * 96)
+    A("""
+R-시리즈가 진단한 것: 순차 파인튜닝에서 조건부 속도장 v(x,t,o,ℓ) 이 현재 태스크의
+marginal 로 붕괴한다(condition blindness). 명령어를 바꿔도 출력이 안 변하고 과거가 소실된다.
+
+B1 은 그 처방으로 제안된 것이다.
+  (1) condition dropout  p=0.1 로 명령어를 NULL 로 바꿔 unconditional 스트림 유지
+  (2) counterfactual anchoring  현재 배치의 (x_t,t,o) 에 과거 명령어 ℓ_j 를 물려
+      student 와 teacher(직전 스냅샷)를 L2 로 붙인다. 과거 데이터는 저장하지 않는다.
+
+기준선 seq-FT (E0 λ=0) 는 AvgSR 35.0 / BWT -78.3 이었다.
+""".strip())
+    A("")
+
+    A("-" * 96)
+    A("1. 팔별 설계와 결과")
+    A("-" * 96)
+    A(f"{'팔':>8}{'AvgSR':>8}{'BWT':>8}{'습득':>7}   앵커 설계 / 저장물")
+    desc = {
+        "seq-FT": "앵커 없음 / 저장 없음",
+        "B1": "rolling teacher, 현재 배치 좌표 / 모델 1개",
+        "B2": "frozen per-task teachers, 현재 배치 좌표 / 모델 N개 3.1GB",
+        "B3": "타깃을 태스크 종료 시 얼림 / 조건벡터 캐시 92MB",
+        "B4": "질의 관측 N=128 고정, 좌표는 매 스텝 재샘플 / 4.1MB",
+        "B5": "자기 롤아웃 튜브 N=32 고정 / 2.4MB, teacher 없음",
+        "B6": "자기 롤아웃 튜브 N=512 고정 / 38MB",
+        "B4N512": "질의 관측 N=512 고정, 좌표 재샘플 / 16MB",
+        "B7": "매 스텝 a_k 를 teacher ℓ_j-field 로 역적분해 좌표 소환 / 저장 0",
+        "B1λ3": "B1 + λ=3", "B1λ10": "B1 + λ=10", "B1λ30": "B1 + λ=30",
+        "B2λ3": "B2 + λ=3  ← 전체 최고", "B2λ10": "B2 + λ=10", "B2λ30": "B2 + λ=30",
+        "B8λ3": "B8 + λ=3", "B8λ10": "B8 + λ=10",
+        "B9": "B2λ3 와 학습 순서만 다름: task1→task0→task2→task3 (열은 실제 task)",
+        "ER": "과거 관측+정답 액션 재생 (태스크당 5 에피소드)",
+    }
+    for name, _, _ in ARMS:
+        m = metrics(D[name], O[name])
+        if m:
+            A(f"{name:>8}{m[0]:8.1f}{m[1]:+8.1f}{m[2]:7.1f}   {desc[name]}")
+        else:
+            got = len(D[name])
+            A(f"{name:>8}{'—':>8}{'—':>8}{'—':>7}   {desc[name]}  [진행 중 {got}/{N*(N+1)//2}칸]")
+    A("")
+
+    A("스테이지별 평균 SR (그때까지 본 태스크만)")
+    A(f"{'팔':>8}" + "".join(f"{'stage'+str(k):>9}" for k in range(N)))
+    for name, _, _ in ARMS:
+        vals = [stage_avg(D[name], k) for k in range(N)]
+        if all(v is None for v in vals):
+            continue
+        A(f"{name:>8}" + "".join(fmt(v, 9) for v in vals))
+    A("")
+
+    A("최종 행 (stage 3) — 태스크별")
+    A(f"{'팔':>8}" + "".join(f"{'task'+str(t):>9}" for t in range(N)))
+    for name, _, _ in ARMS:
+        row = [D[name].get((N - 1, t)) for t in range(N)]
+        if all(v is None for v in row):
+            continue
+        A(f"{name:>8}" + "".join(fmt(v, 9, 0) for v in row))
+    A("")
+
+    A("-" * 96)
+    A("2. 가설 계보 — 세운 것, 검증한 방법, 결과")
+    A("-" * 96)
+    A("""
+[H1] 명령어 유사도 간섭
+  가설   B1 에서 task 1 만 유독 무너진다(95->25). libero_spatial 의 명령어가 서로
+         매우 비슷해서(task0-task1 cos 0.952) 앵커가 두 조건을 분리하지 못한다.
+  실험   B1_diag.py — 스테이지별 조건 민감도 δ 행렬 + CLIP 명령어 코사인 유사도
+  결과   기각. task1 의 최근접 이웃은 task0 이 아니라 아직 배우지도 않은 task5(0.979).
+         유사도가 낮은 task2 는 SR 98 로 멀쩡하고, 유사도-유지 사이에 관계가 없다.
+         산출물 results/B1_diag/report.txt
+
+[H2] 학습 예산(20K steps)이 B1 을 무너뜨린다
+  가설   10태스크 실행(20K steps)에서 stage 4 에 과거가 0 이 됐다. 4태스크(5K)보다
+         스텝이 4배라 앵커가 밀린 것이다.
+  실험   두 실행의 같은 스테이지 궤적 대조
+  결과   기각. task0 유지가 stage1/2/3 에서 90/65/50(5K) vs 74/60/37(20K) 로
+         노이즈 범위 안이다. 4태스크 실행이 붕괴 직전에 멈췄을 뿐이고, 궤적은 같다.
+
+[H3] Δ(guidance)를 보존해야 한다
+  가설   지식의 담지자는 Δ = v(ℓ_j) − v(∅) 이고, 증류가 이를 (1-ε)배 수축시키므로
+         역수 이득 w 로 상쇄해야 한다.
+  실험   B_rotation.py — ckpt_j 대비 Δ 의 크기비와 방향(cos) 측정
+  결과   기각(처방에 한해). 태스크 j 를 막 배워 SR 90~100 인 시점의 ‖Δ_j‖ 가
+         0.089~0.127 로 사실상 0 이다. 보존할 원본이 없다. 이후 스테이지에서 Δ 는
+         40~60배 자라며 원본과 직교한다(cos ~0) — 수축이 아니라 새 구조의 생성이다.
+         ※ 이 숫자는 이론의 반증이 아니라 condition blindness 진단의 직접 증거다.
+            단일 태스크만 배운 모델에서 지식은 Δ 가 아니라 null(marginal)에 있다.
+         산출물 results/B_rotation/report.txt
+
+[H4] coverage — 앵커가 엉뚱한 관측 영역을 지킨다
+  가설   B1 의 앵커 손실은 0.004 로 낮은데 SR 은 0 이다. 앵커는 현재 관측 o_k 에서
+         걸리고 SR 은 과거 관측 o_j 에서 결정되므로, 지키는 영역이 다르다.
+  실험   B1_coverage.py — 같은 (k,j) 의 drift 를 o_j 와 o_k 두 분포에서 분리 측정
+  결과   격차는 실재. 1세대 평균 drift(o_j) 0.307 vs drift(o_k) 0.042 — 7.2배.
+         그러나 이를 고치려 한 처방(B4: 질의 관측 위에서 앵커)은 오히려 악화(65->15).
+         산출물 results/B1_coverage/report.txt
+
+[H5] 관측-액션 정합성
+  가설   B4 가 나빠진 것은 앵커 입력이 (o_j, a_k) 로 관측과 액션이 서로 다른 태스크에서
+         왔기 때문이다. 어떤 태스크도 만들지 않는 좌표라 teacher 의 답이 임의값이다.
+  실험   B5 — 자기 롤아웃으로 정합적인 튜브 위 좌표를 생성해 앵커
+  결과   기각. 정합성을 회복했는데 개선이 없다(B4 15 -> B5 0, stage2 task0).
+         tube adherence 는 rel_err 0.054 / cos 0.997 로 완벽했는데도 SR 은 붕괴했다.
+
+[H6] 조건 커버리지 부족 — 고정점 개수를 늘리면 된다
+  가설   ER 은 태스크당 600 프레임을 쓰는데 B5 는 32 개다. 개수가 부족했다.
+  실험   B6 — B5 와 N 만 다르게(32 -> 512, 16배)
+  결과   기각. stage2 과거평균이 B5 0.0 / B4 7.5 / B6 5.0 / B3 2.5 로,
+         N 이 32~2048 까지 64배 변해도 전부 0~7.5 구간이다.
+
+[H7] 세대 표류(rolling teacher 의 타깃 오염)
+  가설   stage k 의 ℓ_0 앵커 타깃이 teacher_{k-1} 에서 오는데, 그 teacher 는 자신도
+         teacher_{k-2} 를 목표로 학습됐다. 복사본의 복사본이라 오차가 누적된다.
+  실험   B1_drift.py 로 세대 거리별 드리프트 측정 + B2(태스크별 teacher 영구 보관)
+  결과   지지. 드리프트가 세대 거리에 따라 0.276 -> 0.376 -> 0.445 -> 0.539 로
+         단조 증가하고 SR 은 71 -> 31 -> 18.5 -> 0 으로 붕괴한다.
+         B2 가 B1 대비 AvgSR +13.7, BWT +30.0.
+         산출물 results/B1_drift/report.txt
+
+[H8] 앵커점이 매 스텝 새로워야 한다 (현재 유력)
+  관측   성공한 두 팔(B1, B2)만 앵커점이 매 스텝 바뀐다. 실패한 네 팔(B3~B6)은
+         유한 고정 집합에서 채점한다. 그룹 간 격차(약 70%p)가 그룹 내 격차보다 훨씬 크다.
+  보조   B_null.py — ckpt_1 에서 null 이동량은 네 팔 모두 0.52 로 같은데,
+         조건부 이동량이 B1/B2 0.049 vs B4/B5 0.50 으로 10배 갈린다.
+         즉 δ 가 작아진 이유는 null 이 안 움직여서가 아니라 조건부가 끌려갔기 때문이다.
+         또 B1 은 o_1 에서만 앵커를 걸었는데 o_0 에서의 조건부 이동도 0.198 로 억제된다
+         (B5 는 o_0 에서 직접 걸고도 0.357). 고정점 학습은 일반화되지 않는다.
+         산출물 results/B_null/report.txt
+  판정   B4N512(관측 고정 N=512, 좌표 열림) = 35.0 으로 B6(둘 다 고정, 36.2)와 같다.
+         좌표만 열어서는 회복되지 않는다. 성공한 두 팔(B1/B2)은 **관측이 매 스텝 새롭다.**
+         -> 축은 좌표가 아니라 관측이다.
+
+[H9] 추론 시 guidance 증폭 w = 1/(1−ε)
+  가설   망각이 guidance 를 (1−ε)배 수축시키므로 추론에서 되키우면 회복된다.
+         근거 보강: 앵커 계열만 ‖v‖/‖v*‖ = 0.92 로 8% 작다(ER 0.98, seq-FT 1.02).
+  실험   B_wsweep.py — 학습 없이 stage 3 체크포인트를 w = 1.0/1.25/1.5/2.0 로 재롤아웃
+  결과   기각. 두 팔 모두 w=1 이 최고이고 단조 감소한다.
+           B1    67.5 -> 63.8 -> 51.2 -> 23.8
+           B2λ3  80.0 -> 56.2 -> 45.0 -> 37.5
+         task 1 은 w>=1.25 에서 전부 0 이 된다. 크기 부족 가설도 함께 기각.
+         산출물 results/B_compare.txt 의 guidance 증폭 스윕 절
+
+[H10] 예측 오차가 SR 을 설명한다
+  가설   앵커 계열은 velocity 예측이 나빠서 롤아웃이 실패한다.
+  실험   B_errprofile.py — rel/cos/mag, t 4구간, 분위수(p50/p90) 로 분해
+  결과   기각. task 1 에서 ER err 0.328 / SR 100 vs B2λ3 err 0.305 / SR 40.
+         **오차가 더 작은 쪽이 SR 이 낮다.** t 구간별 프로파일·방향(cos)·p90 전부
+         소수 둘째 자리에서 갈리는데 SR 은 5~100 이다. 예측 지표로는 설명 불가.
+         산출물 results/B_errprofile/report.txt
+
+[H11] 조건 병합 — task 1 이 다른 태스크로 흡수됐다
+  가설   task 1 만 무너지는 이유는 그 출력이 유사한 ℓ_0 (또는 최신 ℓ_3) 쪽으로
+         병합됐기 때문이다.
+  실험   B_merge.py — 모든 (관측, 명령어) 조합에서 err 와 조건별 출력 쌍거리
+  결과   기각. 라우팅은 정상이다 — task 1 데이터에서 argmin_i err[ℓ_i] = ℓ_1 이고
+         (0.35 vs 다른 명령어 0.59~0.61), ℓ_1 은 다른 세 조건과 0.42 로 등거리다.
+         병합 상대와 거리가 팔마다 다른데(ℓ0/ℓ2, 0.40~0.44) SR 은 5/25/40 이다.
+         부수 발견: 조건 분리 거리와 SR 이 **비단조**다.
+           seq-FT 0.064 -> 35.0 | ER 0.180 -> 93.8 | 앵커계열 0.38 -> 61~80
+         과소 분리도 과대 분리도 해롭고 ER 만 중간에 있다.
+         산출물 results/B_merge/report.txt
+
+[H12] blind 해의 손실 바닥이 조건 분화를 창발시킨다
+  가설   조건을 무시하는 해의 손실은 λ/(1+λ)·Ĝ² 아래로 못 내려가므로, 정답이
+         충돌하는 좌표에서 분화 압력이 걸린다.
+  실험   B_split.py — 실제 손실 vs 바닥, 그리고 split = ‖v(ℓ_j)−v(ℓ_k)‖/Ĝ
+  결과   전제는 성립. actual/floor = 0.28~0.30 으로 바닥의 1/3 이고 split 0.87~0.92 로
+         거의 완전 분화다. **모델은 blind 가 아니다.**
+         그러나 SR 과 무관하다 — B1 과 B2 는 split·ratio 가 소수점까지 같은데
+         AvgSR 이 62.5 vs 76.2 다. λ 를 키우면 split 0.92 -> 0.73 으로 오히려 줄고
+         ratio 가 0.30 -> 0.60 으로 바닥에 가까워진다(앵커가 세면 teacher 의 blind
+         상태로 끌려가기 때문). λ=10/30 이 나빠진 이유가 이것이다.
+         산출물 results/B_split/report.txt
+
+[H13] task 1 취약성은 학습 순서 때문이다
+  가설   ℓ_0 과 ℓ_1 은 최대 공선 쌍(CLIP cos 0.952)이다. 공선 쌍에서는 나중에 배운
+         쪽이 먼저 배운 쪽으로 흡수된다.
+  실험   B9 — B2λ3 와 **학습 순서만** 0,1,2,3 -> 1,0,2,3 으로 바꿈
+  결과   기각. 순서를 뒤집어도 task 1 이 죽는다.
+           최종 SR    task0   task1
+           기존         90      40
+           뒤집         90      30
+         먼저 배우든 나중에 배우든 task 0 이 살고 task 1 이 죽는다. 오히려 task 1 을
+         먼저 배운 쪽에서 격차가 더 크다(stage 2: task0 100 vs task1 45).
+         비대칭이 학습 이력이 아니라 **태스크 자체에 내재**한다.
+""".strip())
+    A("")
+
+    A("-" * 96)
+    A("2-1. 세 축의 분해 (λ x teacher x 가중)")
+    A("-" * 96)
+    A("""
+              λ=1     λ=3    λ=10    λ=30     teacher / 앵커 가중
+  B1         62.5    70.0    65.0    58.8     rolling / 균등
+  B8         61.2    72.5    66.2      —      rolling / 충돌량 Ĝ 가중
+  B2         76.2    80.0    70.0    68.8     frozen  / 균등
+
+읽는 법
+  · λ 는 세 계열 모두 3 에서 최고이고 그 위로는 역효과다(H12 가 이유를 설명한다).
+  · teacher 고정의 순효과 = B2 − B1 = +13.7(λ=1) / +10.0(λ=3). 가장 큰 단일 요인.
+  · 가중의 순효과 = B8 − B1 = −1.3(λ=1) / +2.5(λ=3) / +1.2(λ=10).
+    λ=1 에서는 무효이고 λ>=3 에서 소폭 양수다. teacher 고정의 1/4 수준.
+  · 두 축은 대체로 가산적이지만 상호작용이 있다 — B8λ3(72.5)가 B1λ3(70.0)보다
+    2.5 높은 반면 B2λ3(80.0)는 B2λ1(76.2)보다 3.8 높다.
+""".strip())
+    A("")
+    A("-" * 96)
+    A("2-2. ER 과의 격차는 사실상 task 1 하나다")
+    A("-" * 96)
+    A("""
+  최종 행     task0   task1   task2   task3   AvgSR
+    B2λ3        90      40     100      90     80.0
+    ER          85     100      90     100     93.8
+    차이        +5     -60     +10     -10    -13.8
+
+  task 0 과 task 2 에서는 우리가 ER 을 이긴다. 격차의 몸통은 task 1 의 60 점이다.
+  task 1 이 어려운 것도 아니다 — 습득 SR 70~100 이고 ER 이 100 으로 지킨다.
+  task 1 최종 SR 은 모든 앵커 팔에서 <=40 이다(B1 25, B2λ3 40, B7 0, B8 5, B9 30).
+  H1/H11/H10/H9/H13 이 전부 기각됐으므로 원인은 아직 미상이다.
+  남은 후보는 태스크의 물리적 성질 — "black bowl next to the ramekin" 은 ramekin
+  바로 옆이라 오차 허용폭이 좁을 수 있다. 롤아웃 영상으로 실패 양상을 보면
+  ("다른 그릇을 집는가" vs "맞는 그릇을 놓치는가") 바로 갈린다. 아직 안 했다.
+""".strip())
+    A("")
+    A("-" * 96)
+    A("3. 만든 진단 도구")
+    A("-" * 96)
+    A("""
+  B1_diag.py       조건 민감도 δ[k][j] 행렬 + CLIP 명령어 유사도 행렬
+  B1_drift.py      상대 드리프트 ‖v_k−v_j‖/‖v_j‖ + 손실 항별 그래디언트 노름
+  B1_coverage.py   같은 (k,j) 의 drift 를 o_j / o_k 두 관측 분포에서 분리
+  B_rotation.py    Δ 의 크기비와 방향(cos) — 수축인가 회전인가
+  B_null.py        δ 감소를 null 이동 vs 조건부 이동으로 분해
+  B_compare.py     전 팔 SR 표 통합 (results/B_compare.txt)
+  B_null.py        δ 감소를 null 이동 vs 조건부 이동으로 분해
+  B_split.py       blind 손실 바닥 vs 실제 손실, 조건 분화 정도
+  B_merge.py       조건별 출력의 병합 상대와 라우팅 정확도
+  B_errprofile.py  오차를 t 구간·방향·크기·분위수로 분해
+  B_wsweep.py      추론 시 guidance 증폭 w 스윕 (학습 없음)
+""".strip())
+    A("")
+
+    A("-" * 96)
+    A("4. 방법론에 대한 기록")
+    A("-" * 96)
+    A("""
+· 등가성 검사: B1.py 는 시작할 때마다 복제한 flow matching 손실이 policy.forward 와
+  일치하는지, 조건 벡터 조립이 _prepare_global_conditioning 과 일치하는지 assert 한다.
+  전 팔에서 ref=mine=0.380409, max|Δ|=0 으로 통과했다.
+
+· 재현성 한계: torch.backends.cudnn.benchmark=True 라(E0 에서 상속) 같은 시드라도
+  실행마다 결과가 비트 단위로 다르다. 20 에피소드 평가의 SE 는 최대 ±11%p 다.
+  따라서 팔 간 10%p 이내 차이는 해석하지 않았고, 그룹 간 40~70%p 격차만 결론에 썼다.
+
+· B3 RNG 버그: 캐시 생성이 torch 전역 RNG 를 소비해 뒤이은 롤아웃 시드가 밀렸다.
+  task0 SR 이 100 이어야 하는데 95 가 나와 발견했고, RNG 상태 저장·복원으로 고친 뒤
+  재실행했다. 이후 전 팔의 R[0][0] 이 100 으로 일치한다.
+
+· 최종 집계: 세운 가설 13개 중 **지지 2개**(H7 세대 표류, H12 분화 압력의 존재),
+  **기각 10개**, **미해결 1개**(task 1 취약성).
+  작동한 개입은 둘뿐이다 — teacher 를 태스크별로 고정(+13.7), λ 를 3으로(+3.8).
+  앵커를 "어디에·어떤 좌표에서·얼마나 가중해" 거는가를 바꾼 시도(B3~B9)는
+  전부 무효이거나 역효과였다.
+
+· 반복된 방법론적 교훈: **손실·예측 지표가 좋아도 SR 이 따라오지 않는다.**
+  B5 는 tube_rel_err 0.054 / cos 0.997 인데 SR 0,
+  B_split 은 actual/floor 0.30 / split 0.92 인데 팔 간 SR 이 62.5~76.2,
+  B_errprofile 은 ER 보다 낮은 오차인데 SR 이 40 vs 100 이었다.
+  중간 스테이지 값으로 최종을 예측한 것도 세 번 틀렸다(B7/B8 이 stage 2 에서
+  B1 을 앞섰으나 최종은 동률). 20 에피소드 SE 는 최대 ±11%p 다.
+
+· 기각된 가설이 다섯, 지지된 것이 둘이다. 특히 H4(coverage)와 H5(정합성)는 측정으로
+  현상을 확인하고도 그것을 고치려는 처방이 역효과를 냈다 — 진단이 맞다고 처방이
+  따라오지 않는다는 점을 기록해 둔다.
+""".strip())
+    A("")
+    A("=" * 96)
+
+    out = REPO / "results" / "SUMMARY.txt"
+    out.write_text("\n".join(L))
+    print("\n".join(L))
+    print(f"\nsaved -> {out}")
+
+
+if __name__ == "__main__":
+    main()

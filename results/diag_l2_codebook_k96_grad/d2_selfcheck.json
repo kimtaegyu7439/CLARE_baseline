@@ -1,0 +1,14 @@
+{
+  "n_success": 318,
+  "carry_ok": 1.0,
+  "near_plate_ok": 1.0,
+  "tol_used_m": 0.09546720976226353,
+  "reach_q95_of_success_m": 0.09546720976226353,
+  "n_success_with_close": 318,
+  "median_d_close_success_m": 0.06135675532732575,
+  "median_d_close_failure_m": 0.0884159648161734,
+  "reach_ok_informational": 0.949685534591195,
+  "tol_sane": true,
+  "separation_ok": true,
+  "passed": true
+}

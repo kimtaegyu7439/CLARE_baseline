@@ -1,0 +1,12 @@
+{
+  "arm": "B4",
+  "anchor": "fixed_point_guidance_distillation",
+  "lambda_a": 1.0,
+  "lambda_n": 0.1,
+  "w_max": 2.0,
+  "ema": 0.9,
+  "ctrl_every": 100,
+  "w_update": "multiplicative",
+  "query_points": 0,
+  "passthru": []
+}

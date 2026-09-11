@@ -1,0 +1,5 @@
+task,ckpt,reach,grasp,transport,place
+3,diag,1,0,0,0
+3,final,0,0,0,0
+5,diag,0,1,0,0
+5,final,0,0,0,1

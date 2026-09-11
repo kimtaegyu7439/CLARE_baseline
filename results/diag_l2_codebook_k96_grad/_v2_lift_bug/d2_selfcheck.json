@@ -1,0 +1,10 @@
+{
+  "n_success": 45,
+  "reach_ok": 0.9333333333333333,
+  "carry_ok": 1.0,
+  "near_plate_ok": 1.0,
+  "tol_used_m": 0.1101891422158779,
+  "reach_q95_of_success_m": 0.1101891422158779,
+  "n_success_with_close": 45,
+  "passed": false
+}

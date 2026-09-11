@@ -1,0 +1,17 @@
+{
+  "arm": "B9",
+  "anchor": "frozen_teachers",
+  "task_order": "3,2,1,0",
+  "lambda_anchor": 3.0,
+  "note": "B2λ3 와 순서만 다름",
+  "passthru": [
+    "--p_drop",
+    "0",
+    "--anchor_agg",
+    "sum",
+    "--out_dir",
+    "results/mod0/B9_3210",
+    "--ckpt_root",
+    "outputs/mod0/B9_3210"
+  ]
+}

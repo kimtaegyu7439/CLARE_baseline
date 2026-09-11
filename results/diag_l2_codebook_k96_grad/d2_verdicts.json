@@ -1,0 +1,31 @@
+{
+  "P4": {
+    "new_failures_by_stage": {
+      "reach": 0,
+      "grasp": 0,
+      "transport": 3,
+      "place": 4
+    },
+    "share_grasp_place": 0.5714285714285714,
+    "n_new_failures": 7
+  },
+  "P5": {
+    "n_reach_failures": 14,
+    "frac_near_other_bowl": 0.0,
+    "note": "각 task 는 서로 다른 bddl 씬이라 '다른 task 의 목표 그릇'이 그 씬에 없다. 같은 씬의 **비목표** 그릇(akita_black_bowl_2 등)에 4cm 이내인 비율로 대체했다."
+  },
+  "selfcheck": {
+    "n_success": 318,
+    "carry_ok": 1.0,
+    "near_plate_ok": 1.0,
+    "tol_used_m": 0.09546720976226353,
+    "reach_q95_of_success_m": 0.09546720976226353,
+    "n_success_with_close": 318,
+    "median_d_close_success_m": 0.06135675532732575,
+    "median_d_close_failure_m": 0.0884159648161734,
+    "reach_ok_informational": 0.949685534591195,
+    "tol_sane": true,
+    "separation_ok": true,
+    "passed": true
+  }
+}

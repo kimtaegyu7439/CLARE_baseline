@@ -1,0 +1,8 @@
+{
+  "P6": {
+    "n_cmp": 9,
+    "frac_rotate_worse": 1.0,
+    "mean_drop_rotate": 23.333333333333332,
+    "mean_drop_scale_worst": -3.888888888888889
+  }
+}

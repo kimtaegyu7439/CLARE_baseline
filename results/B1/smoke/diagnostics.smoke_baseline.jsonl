@@ -1,0 +1,4 @@
+{"task": 0, "step": 0, "fm_loss": 0.32091161608695984, "anchor_loss": 0.0, "grad_norm": 2.6259748935699463, "lr": 2.0000000000000002e-07, "delta_prev": null, "delta_cur": 3.087489128112793}
+{"task": 0, "step": 99, "fm_loss": 0.15620671212673187, "anchor_loss": 0.0, "grad_norm": 1.076918601989746, "lr": 2e-05, "delta_prev": null, "delta_cur": 2.796616315841675}
+{"task": 1, "step": 0, "fm_loss": 0.19969771802425385, "anchor_loss": 0.0, "grad_norm": 3.4372000694274902, "lr": 2.0000000000000002e-07, "delta_prev": 3.2843918800354004, "delta_cur": 3.2379391193389893}
+{"task": 1, "step": 99, "fm_loss": 0.11324974149465561, "anchor_loss": 0.0, "grad_norm": 0.9478333592414856, "lr": 2e-05, "delta_prev": 2.5781805515289307, "delta_cur": 2.545647144317627}

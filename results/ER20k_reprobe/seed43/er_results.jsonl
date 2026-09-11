@@ -1,0 +1,10 @@
+{"run_tag": "er", "ewc_lambda": 0.0, "seed": 43, "stage": 0, "probe_task": 0, "is_old": false, "mse": 0.40345577616244555, "sr": 100.0}
+{"run_tag": "er", "ewc_lambda": 0.0, "seed": 43, "stage": 1, "probe_task": 0, "is_old": true, "mse": 0.4814783111214638, "sr": 95.0}
+{"run_tag": "er", "ewc_lambda": 0.0, "seed": 43, "stage": 1, "probe_task": 1, "is_old": false, "mse": 0.24736984074115753, "sr": 90.0}
+{"run_tag": "er", "ewc_lambda": 0.0, "seed": 43, "stage": 2, "probe_task": 0, "is_old": true, "mse": 0.4931551683694124, "sr": 50.0}
+{"run_tag": "er", "ewc_lambda": 0.0, "seed": 43, "stage": 2, "probe_task": 1, "is_old": true, "mse": 0.3588230535387993, "sr": 75.0}
+{"run_tag": "er", "ewc_lambda": 0.0, "seed": 43, "stage": 2, "probe_task": 2, "is_old": false, "mse": 0.3637803867459297, "sr": 95.0}
+{"run_tag": "er", "ewc_lambda": 0.0, "seed": 43, "stage": 3, "probe_task": 0, "is_old": true, "mse": 0.5054585579782724, "sr": 40.0}
+{"run_tag": "er", "ewc_lambda": 0.0, "seed": 43, "stage": 3, "probe_task": 1, "is_old": true, "mse": 0.3938459036871791, "sr": 65.0}
+{"run_tag": "er", "ewc_lambda": 0.0, "seed": 43, "stage": 3, "probe_task": 2, "is_old": true, "mse": 0.4325831579044461, "sr": 100.0}
+{"run_tag": "er", "ewc_lambda": 0.0, "seed": 43, "stage": 3, "probe_task": 3, "is_old": false, "mse": 0.22759870858862996, "sr": 100.0}

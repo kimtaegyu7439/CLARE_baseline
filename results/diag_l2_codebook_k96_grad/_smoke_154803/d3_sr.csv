@@ -1,0 +1,11 @@
+task,kind,delta,sr,n_episodes
+3,baseline,0.0,50.0,2
+3,scale,-0.3,50.0,2
+3,scale,-0.2,100.0,2
+3,scale,-0.1,100.0,2
+3,scale,0.1,100.0,2
+3,scale,0.2,100.0,2
+3,scale,0.3,100.0,2
+3,rotate,0.1,50.0,2
+3,rotate,0.2,50.0,2
+3,rotate,0.3,100.0,2

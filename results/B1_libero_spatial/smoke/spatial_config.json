@@ -1,0 +1,16 @@
+{
+  "mirror_e0": false,
+  "steps_per_task": 20000,
+  "episodes_per_task": 50,
+  "eval_episodes": 100,
+  "eval_batch_size": 50,
+  "mode": "ours",
+  "p_drop": 0.1,
+  "lambda_anchor": 1.0,
+  "seed": 42,
+  "num_tasks": 10,
+  "guidance_w": 1.0,
+  "device": "cuda",
+  "smoke": true,
+  "report_only": false
+}
