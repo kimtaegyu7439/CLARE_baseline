@@ -5,8 +5,8 @@
 # Override any of these by exporting them before launching a script.
 
 # --- User-facing roots -------------------------------------------------------
-export CLARE_DATA_ROOT=${CLARE_DATA_ROOT:-/home/sa090180/Datasets};
-export CLARE_MODEL_ROOT=${CLARE_MODEL_ROOT:-/home/sa090180/Models};
+export CLARE_DATA_ROOT=${CLARE_DATA_ROOT:-${HOME}/Datasets};
+export CLARE_MODEL_ROOT=${CLARE_MODEL_ROOT:-${HOME}/Models};
 
 # --- Datasets ----------------------------------------------------------------
 # LeRobotDataset resolves its storage dir to $HF_LEROBOT_HOME/<repo_id> whenever

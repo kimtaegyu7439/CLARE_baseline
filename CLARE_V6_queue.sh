@@ -16,9 +16,29 @@
 # 학습과 롤아웃을 분리한다(--eval_after_each_task false -> CLARE_rollout_only.py).
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; cd "${HERE}"
-if [ -z "${CONDA_PREFIX:-}" ] || [ "$(basename "${CONDA_PREFIX:-}")" != "clare" ]; then
-    source /home/sa090180/miniconda3/etc/profile.d/conda.sh; conda activate clare
+# conda 환경. CONDA_ENV 로 이름을, CONDA_SH 로 conda.sh 경로를 덮어쓸 수 있다.
+# 이미 그 환경이 켜져 있으면 아무것도 하지 않는다 (서버마다 홈이 다르다).
+CONDA_ENV=${CONDA_ENV:-clare}
+if [ "$(basename "${CONDA_PREFIX:-}")" != "${CONDA_ENV}" ]; then
+    if [ -z "${CONDA_SH:-}" ]; then
+        for _c in "${HOME}/miniconda3/etc/profile.d/conda.sh" \
+                  "${HOME}/anaconda3/etc/profile.d/conda.sh" \
+                  "${HOME}/mambaforge/etc/profile.d/conda.sh" \
+                  "${CONDA_EXE:+$(dirname "$(dirname "${CONDA_EXE:-/x}")")/etc/profile.d/conda.sh}"; do
+            [ -n "${_c}" ] && [ -f "${_c}" ] && { CONDA_SH="${_c}"; break; }
+        done
+    fi
+    if [ -n "${CONDA_SH:-}" ] && [ -f "${CONDA_SH}" ]; then
+        # shellcheck disable=SC1090
+        source "${CONDA_SH}"; conda activate "${CONDA_ENV}" 2>/dev/null \
+            || echo "경고: conda 환경 '${CONDA_ENV}' 활성화 실패 — 현재 python 으로 계속한다"
+    else
+        echo "경고: conda.sh 를 못 찾았다 — 현재 python 으로 계속한다"
+        echo "      다른 환경이면: CONDA_ENV=<이름> (필요시 CONDA_SH=<경로>) 로 넘겨라"
+    fi
 fi
+python -c 'import torch' 2>/dev/null \
+    || { echo "✗ 현재 python 에 torch 가 없다. CONDA_ENV / CONDA_SH 를 확인해라"; exit 1; }
 source "${HERE}/bash/clare/env.sh"
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 
@@ -42,7 +62,7 @@ ENTRY=${ENTRY:-L2_V6.py}
 VER=${VER:-v6}
 REDUCE=${REDUCE:-mean}
 MIN_FREE_GB=${MIN_FREE_GB:-30}
-PRETRAIN=${PRETRAIN_PATH:-/home/sa090180/Models/dit_flow_mt_libero_90_pretrain}
+PRETRAIN=${PRETRAIN_PATH:-${HOME}/Models/dit_flow_mt_libero_90_pretrain}
 QUEUE="${HERE}/logs/CLARE_V6.queue"
 
 export CUDA_VISIBLE_DEVICES="${GPU}" MUJOCO_EGL_DEVICE_ID="${GPU}" MUJOCO_GL=${MUJOCO_GL:-egl}
