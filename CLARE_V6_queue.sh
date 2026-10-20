@@ -110,6 +110,43 @@ LOG="logs/${TAG}.log"
 NEED=$(( NTASK * (NTASK + 1) / 2 ))
 
 ts() { echo "[$(date '+%F %T')] $*" | tee -a "${QUEUE}"; }
+
+# ── 롤아웃 동시 실행 제한 (VRAM 세마포어) ──────────────────────────────
+# 실측: eval_batch_size=50 롤아웃 1 개의 피크 VRAM 이 약 22G 다. 환경 50 개를
+# 띄우고 EGL 오프스크린 렌더링까지 GPU 에 올리기 때문이고, 학습(약 5G)보다
+# 네 배 넘게 크다. 학습 8 개는 40G 면 되지만 롤아웃 8 개는 175G 라
+# H200(143G)도 넘긴다.
+#   -> 학습은 그대로 병렬로 두고, **롤아웃만** 슬롯 수만큼으로 묶는다.
+# 슬롯 파일 N 개를 flock -n 으로 하나씩 찔러보고, 다 차 있으면 기다린다.
+ROLLOUT_SLOTS=${ROLLOUT_SLOTS:-4}
+ROLL_FD=""
+SLOTDIR="${HERE}/logs/.rollout_slots"
+acquire_rollout_slot() {
+    [ "${ROLLOUT_SLOTS}" -le 0 ] && return 0
+    mkdir -p "${SLOTDIR}"
+    local i fd waited=0
+    while true; do
+        for i in $(seq 1 "${ROLLOUT_SLOTS}"); do
+            exec {fd}>"${SLOTDIR}/slot${i}.lock" 2>/dev/null || continue
+            if flock -n "${fd}" 2>/dev/null; then
+                ROLL_FD="${fd}"
+                ts "   롤아웃 슬롯 ${i}/${ROLLOUT_SLOTS} 획득 (대기 ${waited}s)"
+                return 0
+            fi
+            exec {fd}>&- 2>/dev/null
+        done
+        [ "${waited}" -eq 0 ] && ts "   롤아웃 슬롯 ${ROLLOUT_SLOTS} 개가 다 찼다 — 대기"
+        sleep 30; waited=$((waited + 30))
+    done
+}
+release_rollout_slot() {
+    [ -n "${ROLL_FD}" ] || return 0
+    flock -u "${ROLL_FD}" 2>/dev/null
+    exec {ROLL_FD}>&- 2>/dev/null
+    ROLL_FD=""
+}
+# 중간에 죽어도 슬롯을 물고 있지 않게 한다
+trap 'release_rollout_slot' EXIT INT TERM
 filled() {
     python3 - "$1" <<'PY'
 import sys, pathlib
@@ -148,11 +185,13 @@ ts "◀ ${TAG} 학습 exit=${rc}"
 # ── 2단계: 롤아웃 50회 ──────────────────────────────────────────────────
 CKDIR=$(ls -d "${CKPT}"/*_ours 2>/dev/null | head -1)
 [ -z "${CKDIR}" ] && { ts "   ★ 체크포인트 폴더 없음"; exit 1; }
-ts "▶ ${TAG} 롤아웃 ${N_EVAL}회"
+ts "▶ ${TAG} 롤아웃 ${N_EVAL}회 — 슬롯 대기"
+acquire_rollout_slot
 python -u CLARE_rollout_only.py --ckpt_dir "${CKDIR}" --out "${OUT}" \
     --suite "${SUITE}" --rows all \
     --eval_episodes "${N_EVAL}" --eval_batch_size "${N_EVAL}" \
     --eval_seed "${EVAL_SEED}" >> "${LOG}" 2>&1
 rc=$?
+release_rollout_slot
 ts "◀ ${TAG} 롤아웃 exit=${rc}  ($(filled "${OUT}")/${NEED}칸)"
 python -u CLARE_V6_report.py > /dev/null 2>&1 && ts "   기록 -> results/direction error aware anchor_V6_SR.txt"
