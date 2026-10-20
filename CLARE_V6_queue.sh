@@ -16,10 +16,32 @@
 # 학습과 롤아웃을 분리한다(--eval_after_each_task false -> CLARE_rollout_only.py).
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; cd "${HERE}"
-# conda 환경. CONDA_ENV 로 이름을, CONDA_SH 로 conda.sh 경로를 덮어쓸 수 있다.
-# 이미 그 환경이 켜져 있으면 아무것도 하지 않는다 (서버마다 홈이 다르다).
-CONDA_ENV=${CONDA_ENV:-clare}
-if [ "$(basename "${CONDA_PREFIX:-}")" != "${CONDA_ENV}" ]; then
+# ── 파이썬 환경 ─────────────────────────────────────────────────────────
+# 세 경우를 다 받는다. 서버마다 홈도, 환경 방식도 다르다.
+#   1) 이미 쓸 수 있는 python 이 켜져 있다 (venv 든 conda 든)  -> 아무것도 안 한다
+#   2) VENV=<경로>            -> 그 가상환경(venv/virtualenv)을 켠다
+#   3) CONDA_ENV=<이름>       -> conda 를 켠다 (CONDA_SH 로 conda.sh 경로 지정 가능)
+# activate 스크립트가 구버전이면 set -u 에서 터질 수 있어 잠시 끈다.
+_have_torch() { python -c 'import torch' >/dev/null 2>&1; }
+_act() { set +u; # shellcheck disable=SC1090
+         source "$1" >/dev/null 2>&1; set -u; }
+
+if ! _have_torch; then
+    if [ -n "${VENV:-}" ]; then
+        _va=""
+        for _c in "${VENV}/bin/activate" "${VENV}"; do
+            [ -f "${_c}" ] && { _va="${_c}"; break; }
+        done
+        if [ -n "${_va}" ]; then
+            _act "${_va}"
+        else
+            echo "경고: VENV='${VENV}' 에서 activate 를 못 찾았다"
+        fi
+    fi
+fi
+
+if ! _have_torch; then
+    CONDA_ENV=${CONDA_ENV:-clare}
     if [ -z "${CONDA_SH:-}" ]; then
         for _c in "${HOME}/miniconda3/etc/profile.d/conda.sh" \
                   "${HOME}/anaconda3/etc/profile.d/conda.sh" \
@@ -29,16 +51,19 @@ if [ "$(basename "${CONDA_PREFIX:-}")" != "${CONDA_ENV}" ]; then
         done
     fi
     if [ -n "${CONDA_SH:-}" ] && [ -f "${CONDA_SH}" ]; then
-        # shellcheck disable=SC1090
-        source "${CONDA_SH}"; conda activate "${CONDA_ENV}" 2>/dev/null \
-            || echo "경고: conda 환경 '${CONDA_ENV}' 활성화 실패 — 현재 python 으로 계속한다"
-    else
-        echo "경고: conda.sh 를 못 찾았다 — 현재 python 으로 계속한다"
-        echo "      다른 환경이면: CONDA_ENV=<이름> (필요시 CONDA_SH=<경로>) 로 넘겨라"
+        _act "${CONDA_SH}"
+        set +u; conda activate "${CONDA_ENV}" >/dev/null 2>&1 || true; set -u
     fi
 fi
-python -c 'import torch' 2>/dev/null \
-    || { echo "✗ 현재 python 에 torch 가 없다. CONDA_ENV / CONDA_SH 를 확인해라"; exit 1; }
+
+if ! _have_torch; then
+    echo "✗ 현재 python 에 torch 가 없다 ($(command -v python || echo 'python 없음'))"
+    echo "  셋 중 하나로 알려줘라:"
+    echo "   · 가상환경을 미리 켜고 실행   source ~/tether/bin/activate && bash ..."
+    echo "   · venv 경로를 넘겨서          VENV=~/tether bash ..."
+    echo "   · conda 환경 이름을 넘겨서    CONDA_ENV=<이름> bash ..."
+    exit 1
+fi
 source "${HERE}/bash/clare/env.sh"
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 
