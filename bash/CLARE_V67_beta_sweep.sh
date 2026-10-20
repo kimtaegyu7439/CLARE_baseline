@@ -183,6 +183,16 @@ for item in "${PLAN[@]}"; do
         bash "${HERE}/CLARE_V6_queue.sh"
         rc=$?
         ts "◀ ${TAG} exit=${rc}  ($(filled_cells "results/${TAG}")/${NEED}칸)"
+        # 런이 끝날 때마다 리포트를 갱신해 중간 결과를 볼 수 있게 한다.
+        # 동시 런들이 같은 파일에 쓰므로 flock 으로 직렬화한다(없으면 그냥 돈다).
+        if command -v flock >/dev/null 2>&1; then
+            flock "${HERE}/logs/.v67_report.lock" \
+                python -u "${HERE}/CLARE_V67_sweep_report.py" \
+                --form "${FORM}" --suite goal > /dev/null 2>&1 || true
+        else
+            python -u "${HERE}/CLARE_V67_sweep_report.py" \
+                --form "${FORM}" --suite goal > /dev/null 2>&1 || true
+        fi
     ) &
     running=$((running+1))
     launched=$((launched+1))
@@ -200,5 +210,8 @@ for item in "${PLAN[@]}"; do
     TAG="clare_${VER}_${FORM}_b${BETA}_goal_seed${SEED}"
     printf '  %-40s %s/%s칸\n' "${TAG}" "$(filled_cells "results/${TAG}")" "${NEED}" | tee -a "${Q}"
 done
-python3 -u CLARE_V6_report.py > /dev/null 2>&1 \
-    && ts "리포트 갱신 -> results/direction error aware anchor_V6_SR.txt"
+# β 스윕 전용 리포트 — results/ 를 glob 으로 긁어 시드 집계까지 낸다.
+# (CLARE_V6_report.py 는 런 태그 하드코딩 목록이라 seed42/1000 이 안 들어간다)
+python -u CLARE_V67_sweep_report.py --form "${FORM}" --suite goal > /dev/null 2>&1 \
+    && ts "리포트 갱신 -> results/CLARE_V67_beta_sweep_SR.txt" \
+    || ts "⚠ CLARE_V67_sweep_report.py 실패 — 수동으로 돌려봐라"
