@@ -27,8 +27,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import statistics as st
+import time
 from pathlib import Path
 
 from clare_v4_report import metrics, read_matrix
@@ -54,6 +56,37 @@ def discover(form: str, suite: str):
     # ver -> beta -> seed 순
     out.sort(key=lambda r: (r[0], r[1], r[2]))
     return out
+
+
+def train_progress(d):
+    """sr_matrix.csv 가 없는 런의 학습 진행률. l2cb.jsonl 의 (task, step) 기준."""
+    jl = d / "l2cb.jsonl"
+    if not jl.exists():
+        return None
+    try:
+        cfg = json.loads((d / "config.json").read_text())
+        n_task = int(cfg.get("num_tasks") or 10)
+        n_step = int(cfg.get("steps_per_task") or 10000)
+    except Exception:
+        n_task, n_step = 10, 10000
+    last = None
+    try:
+        with jl.open() as fh:
+            for line in fh:
+                if line.strip():
+                    last = line.strip()
+    except Exception:
+        return None
+    if not last:
+        return None
+    try:
+        r = json.loads(last)
+        t, st_ = int(r.get("task", 0)), int(r.get("step", 0))
+    except Exception:
+        return None
+    return dict(task=t, n_task=n_task, step=st_, n_step=n_step,
+                pct=100.0 * (t * n_step + st_) / max(1, n_task * n_step),
+                age_h=(time.time() - jl.stat().st_mtime) / 3600.0)
 
 
 def load(rows):
@@ -111,7 +144,14 @@ def main() -> None:
     for r in recs:
         tag = f"{r['ver']} β{r['beta']:g} seed{r['seed']}"
         if r["m"] is None:
-            add(f"  {tag:<34}{SPACE[r['ver']]:>5}" + f1(None) * 4 + "   미시작")
+            pr = train_progress(r["dir"])
+            if pr is None:
+                add(f"  {tag:<34}{SPACE[r['ver']]:>5}" + f1(None) * 4 + "   미시작")
+            else:
+                stale = "" if pr["age_h"] < 0.5 else f"  ⚠{pr['age_h']:.1f}h 정지?"
+                add(f"  {tag:<34}{SPACE[r['ver']]:>5}" + f1(None) * 4 +
+                    f"   학습 중 t{pr['task']}/{pr['n_task'] - 1}"
+                    f" step {pr['step']}/{pr['n_step']} ({pr['pct']:.0f}%){stale}")
             continue
         m = r["m"]
         state = "완주" if r["done"] else f"진행 중 {r['filled']}/{r['total']}칸"

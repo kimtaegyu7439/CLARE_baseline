@@ -22,7 +22,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import statistics as st
+import time
 from pathlib import Path
 
 from clare_v4_report import metrics, read_matrix
@@ -51,6 +53,45 @@ def tag_of(beta: float, seed: int, batch: int) -> str:
         if (RESULTS / c / "sr_matrix.csv").exists():
             return c
     return cands[0]
+
+
+def train_progress(tag: str):
+    """sr_matrix.csv 가 아직 없는 런의 **학습 진행률**. 롤아웃 전에도 보이게.
+
+    l2cb.jsonl 마지막 줄의 (task, step) 과 config 의 (num_tasks, steps_per_task)
+    로 전체 대비 몇 %인지 센다. 학습이 끝나고 롤아웃이 시작되면 sr_matrix.csv
+    가 생기므로 그때부터는 칸 수로 바뀐다.
+    """
+    d = RESULTS / tag
+    cfg_p, jl_p = d / "config.json", d / "l2cb.jsonl"
+    if not jl_p.exists():
+        return None
+    try:
+        cfg = json.loads(cfg_p.read_text())
+        n_task = int(cfg.get("num_tasks") or 10)
+        n_step = int(cfg.get("steps_per_task") or 10000)
+    except Exception:
+        n_task, n_step = 10, 10000
+    last = None
+    try:
+        with jl_p.open() as fh:
+            for line in fh:
+                line = line.strip()
+                if line:
+                    last = line
+    except Exception:
+        return None
+    if not last:
+        return None
+    try:
+        r = json.loads(last)
+        t, st_ = int(r.get("task", 0)), int(r.get("step", 0))
+    except Exception:
+        return None
+    frac = (t * n_step + st_) / max(1, n_task * n_step)
+    mt = jl_p.stat().st_mtime
+    return dict(task=t, n_task=n_task, step=st_, n_step=n_step,
+                pct=100.0 * frac, mtime=mt)
 
 
 def load(tag: str):
@@ -103,7 +144,16 @@ def main() -> None:
             tag = tag_of(a.beta, seed, batch)
             r = load(tag)
             if r is None:
-                add(f"  {seed:>5}{batch:>6}" + f"{'-':>9}" * 4 + f"   미시작   {tag}")
+                pr = train_progress(tag)
+                if pr is None:
+                    add(f"  {seed:>5}{batch:>6}" + f"{'-':>9}" * 4 + f"   미시작   {tag}")
+                else:
+                    age = (time.time() - pr["mtime"]) / 60.0
+                    stale = "" if age < 30 else f" (갱신 {age/60:.1f}h 전 — 멈췄을 수 있다)"
+                    add(f"  {seed:>5}{batch:>6}" + f"{'-':>9}" * 4 +
+                        f"   학습 중 task {pr['task']}/{pr['n_task'] - 1}"
+                        f" step {pr['step']}/{pr['n_step']} ({pr['pct']:.0f}%){stale}")
+                    add(f"  {'':>11}{'':>36}{tag}")
                 continue
             rows[batch][seed] = r
             m = r["m"]
