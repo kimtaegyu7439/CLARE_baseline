@@ -737,6 +737,10 @@ def main() -> None:
                     help="p(s|j) 를 대각 대신 완전 공분산으로 (s = μ + Lε)")
     ap.add_argument("--cov_ridge", type=float, default=0.05)
     ap.add_argument("--xt_mode", choices=["teacher", "current"], default="teacher")
+    ap.add_argument("--seed", type=int, default=42,
+                    help="B1 학습/평가 시드 + 코드북 k-means 시드. 기본 42 는 기존 실행과 "
+                         "같다. ckpt_root 가 {suite}_seed{seed}_ours 라 시드가 다르면 "
+                         "체크포인트도 자동으로 갈린다.")
     ap.add_argument("--passthru", nargs=argparse.REMAINDER, default=[])
     args = ap.parse_args()
 
@@ -746,12 +750,15 @@ def main() -> None:
     args.out_dir = str(out_dir)
     args.batch_size = 32
     args.p_drop = 0.0
-    args.seed = 42
+    # args.seed 는 --seed 로 받는다(기본 42). build_codebook 의 k-means 시드이면서
+    # 아래 argv 를 통해 B1 의 학습/평가 시드로도 넘어간다 — 둘을 갈라 두면
+    # "시드를 바꿨다"는 말이 무엇을 바꿨는지 불분명해진다.
     out_dir.mkdir(parents=True, exist_ok=True)
 
     B1.ANCHOR = L2CodebookAnchor(args)
 
     argv = ["B1.py", "--p_drop", "0", "--guidance_w", "1.0", "--lambda_anchor", "1.0",
+            "--seed", str(args.seed),
             "--out_dir", str(out_dir), "--ckpt_root", str(REPO / "outputs" / "L2_codebook")]
     if args.smoke:
         argv.append("--smoke")
@@ -772,6 +779,7 @@ def main() -> None:
         "grad_enable": args.grad_enable, "ridge_rho": args.ridge_rho,
         "grad_min_frames": args.grad_min_frames,
         "full_cov_s": args.full_cov_s, "cov_ridge": args.cov_ridge,
+        "seed": args.seed,
         "xt_mode": args.xt_mode, "lambda_level": args.lambda_level,
         "anchor_norm": args.anchor_norm, "chunk_backward": args.chunk_backward,
         "time_bin": "제거 (R10.compute_stats/phase_bins 를 예외로 차단)",

@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# 미뤄 둔 V5 seed1000 을 **GPU 가 비는 순서대로** 되살린다.
+#
+# 앞 버전(CLARE_chain_after_v6.sh)은 V6 가 끝나면 GPU 0/1/2 에 한꺼번에 띄웠다.
+# 지금은 GPU 0 과 3 에서 V8(mse_da / mag_da)이 돌고 있으므로 그 둘은 건드리면
+# 안 된다. 그래서 대기 조건을 GPU 별로 쪼갠다.
+#
+#   GPU 1  V7 dea 롤아웃(CLARE_V6_queue.sh)이 끝나면  -> V5 c=0.1  seed1000 학습+롤아웃
+#   GPU 2  V6 dea ε1e-5 롤아웃이 끝나면               -> V5 c=0.05 seed1000 학습+롤아웃
+#   GPU 0  V8 mse_da 가 끝나면                        -> V5 c=0.01 seed1000 **롤아웃만**
+#                                                        (학습 완료, 32/55칸 차 있다)
+set -uo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")"
+if [ -z "${CONDA_PREFIX:-}" ] || [ "$(basename "${CONDA_PREFIX:-}")" != "clare" ]; then
+    source /home/sa090180/miniconda3/etc/profile.d/conda.sh; conda activate clare
+fi
+ts() { echo "[$(date '+%F %T')] $*"; }
+
+wait_pid() { while kill -0 "$1" 2>/dev/null; do sleep 120; done; }
+
+GPU1_WAIT=${GPU1_WAIT:?V7 dea 큐의 pid}
+GPU2_WAIT=${GPU2_WAIT:?V6 dea ε1e-5 롤아웃의 pid}
+GPU0_WAIT=${GPU0_WAIT:?V8 mse_da 큐의 pid}
+
+( wait_pid "${GPU1_WAIT}"; ts "GPU1 해제 — V5 c=0.1 seed1000"
+  exec env GPU=1 C=0.1 SEEDS=1000 bash CLARE_v5_seeds.sh
+) > logs/launch_v5resume_gpu1.log 2>&1 &
+
+( wait_pid "${GPU2_WAIT}"; ts "GPU2 해제 — V5 c=0.05 seed1000"
+  exec env GPU=2 C=0.05 SEEDS=1000 bash CLARE_v5_seeds.sh
+) > logs/launch_v5resume_gpu2.log 2>&1 &
+
+( wait_pid "${GPU0_WAIT}"; ts "GPU0 해제 — V5 c=0.01 seed1000 롤아웃만"
+  CK=$(ls -d outputs/CLARE_MAR/v5_goal_c0.01_seed1000/*_ours 2>/dev/null | head -1)
+  [ -z "${CK}" ] && { ts "체크포인트 없음 — 건너뜀"; exit 1; }
+  exec env GPU=0 ROWS=all CK="${CK}" OUT=results/clare_v5_goal_c0.01_seed1000 \
+      N_EVAL=50 bash CLARE_rollout_queue.sh
+) > logs/launch_v5resume_gpu0.log 2>&1 &
+
+ts "3 건 예약 완료 — GPU1<-pid ${GPU1_WAIT}, GPU2<-pid ${GPU2_WAIT}, GPU0<-pid ${GPU0_WAIT}"
+wait

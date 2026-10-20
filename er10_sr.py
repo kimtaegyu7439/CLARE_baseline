@@ -56,18 +56,39 @@ def from_csv(path: Path) -> dict[tuple[int, int], float]:
 
 
 def stats(c: dict[tuple[int, int], float]) -> dict:
+    """AvgSR/BWT 에 LIBERO 지표(FWT/NBT/AUC)를 더한다.
+
+    정의는 l2_family_report.py · L2_codebook_grad_report.py · tools/plot_sr_matrix.py
+    와 동일하다(LIBERO 벤치마크, Liu et al. 2023). 세 파일의 숫자를 그대로
+    나란히 놓고 비교할 수 있어야 하므로 식을 공유한다.
+
+        FWT_t = R[t][t]                        갓 배운 직후 (= '습득', 대각)
+        NBT_t = mean_{k>t} (R[t][t] − R[k][t])   배운 뒤 잃은 양 (+면 망각)
+        AUC_t = mean_{k>=t} R[k][t]            시퀀스 내내 낸 평균
+    """
     last = [c[(K - 1, t)] for t in range(K)]
     diag = [c[(t, t)] for t in range(K)]
+    fwt, nbt, auc = [], [], []
+    for t in range(K):
+        col = [c[(k, t)] for k in range(t, K) if (k, t) in c]
+        if not col:
+            continue
+        fwt.append(col[0])
+        auc.append(sum(col) / len(col))
+        if len(col) > 1:                       # 마지막 태스크는 NBT 가 정의되지 않는다
+            nbt.append(col[0] - sum(col[1:]) / len(col[1:]))
+    mean = lambda v: (sum(v) / len(v)) if v else None          # noqa: E731
     return {"avg": sum(last) / K,
             "acq": sum(diag) / K,
             "bwt": sum(last[t] - diag[t] for t in range(K - 1)) / (K - 1),
+            "fwt": mean(fwt), "nbt": mean(nbt), "auc": mean(auc),
             "n": len(c)}
 
 
 def block(name: str, c: dict, s: dict, src: str) -> list[str]:
     L = ["-" * 84,
-         f"{name}   ({s['n']}/55 칸)   AvgSR {s['avg']:.1f}   "
-         f"BWT {s['bwt']:+.1f}   습득 {s['acq']:.1f}",
+         f"{name}   ({s['n']}/55 칸)   AvgSR {s['avg']:.1f}   FWT↑ {s['fwt']:.1f}   "
+         f"NBT↓ {s['nbt']:+.1f}   AUC↑ {s['auc']:.1f}   BWT↑ {s['bwt']:+.1f}",
          f"출처 {src}",
          "-" * 84,
          "after\\task " + "".join(f"{t:>6}" for t in range(K))]
@@ -93,14 +114,24 @@ def main() -> None:
          "          이항 표준오차가 칸당 최대 ±11%p 다. 행/열 평균으로 읽어야 한다.",
          "",
          "행 = 스테이지 k (태스크 k 까지 학습한 시점), 열 = 평가 태스크 j. 하삼각 55칸.",
-         "AvgSR = 마지막 행 평균,  습득 = 대각 평균,  BWT = 마지막행 − 대각 (task9 제외).",
          "집계값은 이 스크립트가 칸에서 다시 계산한 것이다(er10_sr.py).", "",
+         "지표 (LIBERO 벤치마크 Liu et al. 2023 — L2_SR_matrix.txt 와 같은 정의)",
+         "  AvgSR = mean_t R[9][t]                          높을수록 좋음",
+         "  FWT   = mean_t R[t][t]                          높을수록 좋음",
+         "          예전 표기의 '습득'(대각 평균)과 같은 값이다. 이름만 바꿨다.",
+         "  NBT   = mean_t mean_{k>t} (R[t][t] − R[k][t])   **낮을수록** 좋음, +면 망각",
+         "  AUC   = mean_t mean_{k>=t} R[k][t]              높을수록 좋음",
+         "  BWT   = mean_t (R[9][t] − R[t][t])              높을수록 좋음 (task9 제외)",
+         "",
+         "  NBT 와 BWT 는 다르다. BWT 는 마지막 행 한 줄만 보고, NBT 는 배운 뒤의",
+         "  모든 스테이지를 평균한다. 그래서 NBT ≈ −BWT 이지만 같지 않다.", "",
          "-" * 84, "요약", "-" * 84,
-         f"{'스위트':<18}{'AvgSR':>8}{'BWT':>8}{'습득':>8}", ""]
+         f"{'스위트':<18}{'AvgSR':>8}{'FWT↑':>8}{'NBT↓':>8}{'AUC↑':>8}{'BWT↑':>8}", ""]
     for s in SUITES:
         c, _ = got[s]
         st = stats(c)
-        L.append(f"{s:<18}{st['avg']:>8.1f}{st['bwt']:>+8.1f}{st['acq']:>8.1f}")
+        L.append(f"{s:<18}{st['avg']:>8.1f}{st['fwt']:>8.1f}{st['nbt']:>+8.1f}"
+                 f"{st['auc']:>8.1f}{st['bwt']:>+8.1f}")
     L += ["", "주의  results/ER_libero_40_SR.txt 는 40 태스크를 한 줄로 이어붙인 별개 실험이다",
           "      (820칸, AvgSR 55.8). 위 표와 직접 비교하면 안 된다.", ""]
 
@@ -112,8 +143,8 @@ def main() -> None:
     print(f"saved -> {OUT}")
     for s in SUITES:
         st = stats(got[s][0])
-        print(f"  {s:<16} {st['n']}/55 칸  AvgSR {st['avg']:.1f}  "
-              f"BWT {st['bwt']:+.1f}  습득 {st['acq']:.1f}")
+        print(f"  {s:<16} {st['n']}/55 칸  AvgSR {st['avg']:.1f}  FWT {st['fwt']:.1f}  "
+              f"NBT {st['nbt']:+.1f}  AUC {st['auc']:.1f}  BWT {st['bwt']:+.1f}")
 
 
 if __name__ == "__main__":

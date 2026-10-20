@@ -77,6 +77,34 @@ def last_full_row(c):
     return best
 
 
+def libero_metrics(c, kmax):
+    """LIBERO 벤치마크(Liu et al., 2023) 지표. tools/plot_sr_matrix.py 와 같은 정의다.
+
+        FWT_t = R[t][t]                     갓 배운 직후의 성능 (= 대각, '습득')
+        NBT_t = mean_{k>t} (FWT_t − R[k][t])  이후에 얼마나 잃었나 (+면 망각)
+        AUC_t = mean_{k>=t} R[k][t]         그 태스크가 시퀀스 내내 낸 평균
+
+    셋 다 태스크에 대해 평균한다. 마지막 태스크는 뒤따르는 스테이지가 없어
+    NBT 가 정의되지 않으므로 NBT 평균에서만 뺀다. 진행 중인 팔은 마지막 **완성**
+    행까지만 써서 부분 집계를 낸다(집계 기준이 AvgSR/BWT 와 같아진다).
+
+    ★ FWT 와 '습득' 은 같은 값이다 — 둘 다 대각 평균이다. NBT 는 그 반대편,
+      즉 망각 쪽 지표다. BWT 와도 다르다: BWT 는 **마지막 행**만 보고,
+      NBT 는 배운 뒤의 **모든** 스테이지를 평균한다.
+    """
+    fwt, nbt, auc = [], [], []
+    for t in range(kmax + 1):
+        col = [c[(k, t)] for k in range(t, kmax + 1) if (k, t) in c]
+        if not col:
+            continue
+        fwt.append(col[0])
+        auc.append(sum(col) / len(col))
+        if len(col) > 1:
+            nbt.append(col[0] - sum(col[1:]) / len(col[1:]))
+    mean = lambda v: (sum(v) / len(v)) if v else None            # noqa: E731
+    return mean(fwt), mean(nbt), mean(auc)
+
+
 def stats(c):
     k = last_full_row(c)
     if k is None:
@@ -88,8 +116,16 @@ def stats(c):
     acq = sum(acq) / len(acq) if acq[0] is not None else None
     bwt = (sum(last[t] - diag[t] for t in range(k))
            / max(k, 1)) if k and all(v is not None for v in diag) else None
+    fwt, nbt, auc = libero_metrics(c, k)
     return {"row": k, "avg": avg, "bwt": bwt, "acq": acq,
+            "fwt": fwt, "nbt": nbt, "auc": auc,
             "filled": len(c), "done": k == K - 1}
+
+
+def _cell(v, sign=False):
+    if v is None:
+        return f"{'-':>8}"
+    return f"{v:+8.1f}" if sign else f"{v:8.1f}"
 
 
 def main() -> None:
@@ -102,23 +138,37 @@ def main() -> None:
          "칸당 20 롤아웃이라 개별 칸의 이항 표준오차는 ±11%p, 10칸 평균도 ±3.5%p 수준이다.",
          "시드 하나(42)이므로 팔 사이 수%p 차이는 시드 반복 없이는 확정할 수 없다.",
          "",
-         "AvgSR = 마지막 완성 행의 평균 · 습득 = 대각 평균 · BWT = 마지막행 − 대각",
+         "지표 (LIBERO 벤치마크 Liu et al. 2023 정의 — tools/plot_sr_matrix.py 와 같다)",
+         "  R[k][t] = 스테이지 k 체크포인트를 태스크 t 에서 잰 SR (t<=k 에서만 정의)",
+         "  AvgSR = 마지막 완성 행의 평균                      높을수록 좋음",
+         "  FWT   = mean_t R[t][t]        갓 배운 직후 성능    높을수록 좋음",
+         "          = 예전 표의 '습득'(대각 평균)과 **같은 값**이다. 이름만 바꿨다.",
+         "  NBT   = mean_t mean_{k>t} (R[t][t] − R[k][t])      **낮을수록** 좋음",
+         "          배운 뒤 얼마나 잃었는지. + 면 망각. FWT 의 반대편 지표다.",
+         "  AUC   = mean_t mean_{k>=t} R[k][t]                 높을수록 좋음",
+         "  BWT   = mean_t (R[마지막][t] − R[t][t])            높을수록 좋음",
+         "",
+         "  ★ NBT 와 BWT 는 다르다. BWT 는 **마지막 행 한 줄**만 보고, NBT 는 배운",
+         "    뒤의 **모든 스테이지**를 평균한다. 그래서 NBT ≈ −BWT 이지만 같지 않다.",
+         "  ★ GEM 식 FWT(배우기 전 zero-shot 성능)는 이 표로 계산할 수 없다 —",
+         "    하삼각이라 t>k 칸을 아예 평가하지 않았기 때문이다.",
+         "  진행 중인 팔은 마지막 완성 행까지만 써서 낸 부분 집계다.",
          ""]
 
     # ── 요약 ─────────────────────────────────────────────────────────────
     L += ["-" * 86, "요약", "-" * 86,
-          f"{'팔':<16}{'AvgSR':>8}{'BWT':>8}{'습득':>8}  {'상태':<22}설명", ""]
+          f"{'팔':<16}{'AvgSR':>8}{'FWT↑':>8}{'NBT↓':>8}{'AUC↑':>8}{'BWT↑':>8}"
+          f"  {'상태':<22}설명", ""]
     rows = []
     for name, d, desc in ARMS:
         c = read_csv(RES / d)
         s = stats(c)
         if s is None:
-            L.append(f"{name:<16}{'-':>8}{'-':>8}{'-':>8}  {'미시작':<22}{desc}")
+            L.append(f"{name:<16}" + f"{'-':>8}" * 5 + f"  {'미시작':<22}{desc}")
             continue
         st = "완료" if s["done"] else f"진행 중 {s['filled']}/55칸 (행{s['row']})"
-        L.append(f"{name:<16}{s['avg']:8.1f}"
-                 + (f"{s['bwt']:+8.1f}" if s["bwt"] is not None else f"{'-':>8}")
-                 + (f"{s['acq']:8.1f}" if s["acq"] is not None else f"{'-':>8}")
+        L.append(f"{name:<16}{s['avg']:8.1f}" + _cell(s["fwt"]) + _cell(s["nbt"], True)
+                 + _cell(s["auc"]) + _cell(s["bwt"], True)
                  + f"  {st:<22}{desc}")
         rows.append((name, c, s))
     L += ["", "참고 (같은 프로토콜)"]
@@ -128,9 +178,8 @@ def main() -> None:
         s = stats(c)
         if s is None:
             continue
-        L.append(f"{name:<16}{s['avg']:8.1f}"
-                 + (f"{s['bwt']:+8.1f}" if s["bwt"] is not None else f"{'-':>8}")
-                 + (f"{s['acq']:8.1f}" if s["acq"] is not None else f"{'-':>8}")
+        L.append(f"{name:<16}{s['avg']:8.1f}" + _cell(s["fwt"]) + _cell(s["nbt"], True)
+                 + _cell(s["auc"]) + _cell(s["bwt"], True)
                  + f"  {'완료' if s['done'] else '진행중':<22}{desc}")
         refs.append((name, c, s))
     L.append("")
@@ -166,13 +215,20 @@ def main() -> None:
     # ── 팔별 전표 ────────────────────────────────────────────────────────
     for (name, d, desc), (nm, c, s) in zip(
             [a for a in ARMS if stats(read_csv(RES / a[1])) is not None], rows):
+        st2 = "완료" if s["done"] else f"진행 중 {s['filled']}/55칸"
         L += ["-" * 86,
-              f"{name}   ({d})   {'완료' if s['done'] else f'진행 중 {s[chr(39)+chr(39)] if False else s['filled']}/55칸'}",
+              f"{name}   ({d})   {st2}",
               f"  {desc}", "-" * 86,
               f"{'after':<8}" + "".join(f"{'t'+str(t):>6}" for t in range(K))]
         for k in range(K):
             L.append(f"{k:<8}" + "".join(
                 (f"{c[(k,t)]:6.0f}" if (k, t) in c else f"{'':>6}") for t in range(K)))
+        L.append(f"  지표  AvgSR {s['avg']:.1f}   FWT↑ "
+                 + ("-" if s["fwt"] is None else f"{s['fwt']:.1f}") + "   NBT↓ "
+                 + ("-" if s["nbt"] is None else f"{s['nbt']:+.1f}") + "   AUC↑ "
+                 + ("-" if s["auc"] is None else f"{s['auc']:.1f}") + "   BWT↑ "
+                 + ("-" if s["bwt"] is None else f"{s['bwt']:+.1f}")
+                 + ("" if s["done"] else f"   (행{s['row']}까지 부분 집계)"))
         cfg = RES / d / "l2_config.json"
         if cfg.exists():
             try:

@@ -25,6 +25,7 @@ l2_codebook 은 클러스터링 직전에 z = (s-mean)/std 로 다시 표준화�
 from __future__ import annotations
 
 import argparse
+import textwrap
 import json
 import sys
 from pathlib import Path
@@ -34,6 +35,10 @@ import torch
 import matplotlib
 
 matplotlib.use("Agg")
+# PDF/PS 에 글꼴을 Type3 가 아니라 TrueType 으로 박는다. 대부분의 학회 제출
+# 검사기가 Type3 를 거른다. PNG 만 낼 때도 해가 없다.
+matplotlib.rcParams["pdf.fonttype"] = 42
+matplotlib.rcParams["ps.fonttype"] = 42
 import matplotlib.pyplot as plt                       # noqa: E402
 from matplotlib.patches import Ellipse                # noqa: E402
 from scipy.stats import beta as beta_dist             # noqa: E402
@@ -226,6 +231,31 @@ def main() -> None:
                     help="셀을 무작위로 N 개 뽑아 모델-vs-실제 타원만 따로 그린 그림도 "
                          "낸다. 0 이면 끔. 무작위이므로 예시 셀 선택 시비가 없다")
     ap.add_argument("--grid_seed", type=int, default=-1, help="-1 = --seed 를 쓴다")
+    ap.add_argument("--grid_pick", choices=("random", "gaussian"), default="random",
+                    help="random = 무작위 추첨(기본). gaussian = 실제 점의 1σ/2σ/3σ "
+                         "포함률이 이론값(39.3/86.5/98.9)에 가장 가까운 셀부터 고른다.")
+    ap.add_argument("--grid_min_n", type=int, default=25,
+                    help="--grid_pick gaussian 에서 요구하는 최소 표본 수. 점이 적으면 "
+                         "포함률 자체가 요동쳐 '가까움'이 우연이 된다.")
+    ap.add_argument("--grid_models", choices=("both", "full"), default="both",
+                    help="both = 대각·완전공분산 둘 다(기본). full = 완전공분산만 "
+                         "(대각 타원과 diag 포함률 줄을 그리지 않는다).")
+    ap.add_argument("--grid_cols", type=int, default=0,
+                    help="0 = 자동(셀 4개면 2열, 그 외 3열)")
+    ap.add_argument("--grid_cells", default="",
+                    help="쉼표로 구분한 셀 번호. 주면 --grid_pick 을 무시하고 이 셀만 "
+                         "그린다 (예: 34,67).")
+    ap.add_argument("--grid_title", default="",
+                    help="격자 그림 제목 첫 줄을 직접 지정. 비우면 기본 문구.")
+    ap.add_argument("--pdf", action="store_true",
+                    help="PNG 옆에 벡터 PDF 도 같이 낸다. 논문에 넣을 때는 이쪽이다 — "
+                         "확대해도 안 깨지고 글자가 텍스트로 남는다.")
+    ap.add_argument("--grid_hide_seed", action="store_true",
+                    help="무작위 추첨 문구에서 '(seed N)' 을 뺀다. 추첨 자체는 그대로다 "
+                         "— 재현에 필요한 시드는 report/JSON 에 남는다.")
+    ap.add_argument("--grid_subtitle", default="",
+                    help="제목 둘째 줄을 직접 지정. 비우면 'suite task N, K_eff=.., "
+                         "... plane'.")
     ap.add_argument("--plane", choices=("pca", "diff"), default="pca",
                     help="타원을 그릴 2D 평면. pca = 셀 자신의 주성분(기본), "
                          "diff = 두 모델이 가장 크게 어긋나는 평면")
@@ -313,10 +343,10 @@ def main() -> None:
         order_ks = np.argsort(ksf_c)
         pos = {"median": len(usable) // 2, "worst": len(usable) - 1, "best": 0}
         if a.pick == "largest":
-            cell, pick_note = int(usable[int(np.argmax(n_c))]), "largest cell"
+            cell, pick_note = int(usable[int(np.argmax(n_c))]), "largest cluster"
         else:
             cell = int(usable[int(order_ks[pos[a.pick]])])
-            pick_note = f"{a.pick}-KS cell"
+            pick_note = f"{a.pick}-KS cluster"
     if cell not in per_cell:
         raise SystemExit(f"셀 {cell} 은 표본이 {cnt[cell] if cell < K_eff else 0} 개뿐이라 진단 불가")
     ci = usable.index(cell)
@@ -363,13 +393,13 @@ def main() -> None:
 
     # A. 셀 구조 -------------------------------------------------------------
     ax = axes[0, 0]
-    cval, clab = ((rank[lab[m_plot]], "codebook cell (ordered by center PC1)")
+    cval, clab = ((rank[lab[m_plot]], "codebook cluster (ordered by center PC1)")
                   if a.color == "cell" else (phase[m_plot], "episode phase (0=start, 1=end)"))
     sc = ax.scatter(emb[:, 0], emb[:, 1], c=cval, cmap=plt.cm.viridis,
                     s=5, alpha=.70, edgecolors="none")
     hit = lab[m_plot] == cell
     ax.scatter(emb[hit, 0], emb[hit, 1], s=13, color="crimson", edgecolors="none",
-               label=f"cell {cell} (n={cnt[cell]})")
+               label=f"cluster {cell} (n={cnt[cell]})")
     fig.colorbar(sc, ax=ax, fraction=.046, label=clab)
     ax.set_title(f"{left_title}\n(layout only — density here is distorted, not evidence)",
                  fontsize=11)
@@ -380,7 +410,7 @@ def main() -> None:
     # 이 패널은 **예시**다. 결론은 옆의 C/F 가 지고 간다.
     ax = axes[0, 1]
     ax.scatter(q[:, 0], q[:, 1], s=11, alpha=.55, color="#3b5f86", edgecolors="none",
-               zorder=2, label="real frames in the cell")
+               zorder=2, label="real frames in the cluster")
     for k_, ls in ((1, "-"), (2, "--"), (3, ":")):
         ellipse_cov(ax, M_diag, k_, ec="#c2410c", lw=1.8, ls=ls, zorder=3)
         ellipse_cov(ax, M_full, k_, ec="#1a7f37", lw=1.8, ls=ls, zorder=3)
@@ -392,9 +422,9 @@ def main() -> None:
             f"full  {in_full[0]*100:5.1f} {in_full[1]*100:5.1f} {in_full[2]*100:5.1f}",
             transform=ax.transAxes, va="top", fontsize=9, family="monospace",
             bbox=dict(fc="white", ec="0.7", alpha=.85, pad=3))
-    ax.set_title(f"Example: cell {cell} — {pick_note}, KS rank {cell_rank}/{len(usable)}, "
+    ax.set_title(f"Example: cluster {cell} — {pick_note}, KS rank {cell_rank}/{len(usable)}, "
                  f"n={cnt[cell]}\nmodelled Gaussian vs the real points "
-                 f"({'cell PCA' if a.plane == 'pca' else 'max-discrepancy'} plane)",
+                 f"({'cluster PCA' if a.plane == 'pca' else 'max-discrepancy'} plane)",
                  fontsize=10.5)
     ax.legend(loc="lower right", fontsize=7.6, framealpha=.9)
     ax.set_xlabel("axis 1"); ax.set_ylabel("axis 2")
@@ -419,8 +449,8 @@ def main() -> None:
     ax.set_xticks([1, 2, 3]); ax.set_xticklabels(["1σ", "2σ", "3σ"])
     ax.set_xlim(.5, 3.5); ax.set_ylim(0, 108)
     ax.set_ylabel("real points inside the model ellipse (%)")
-    ax.set_title(f"Same check on every cell ({len(usable)} cells)\n"
-                 f"◆ = the example cell,  number = median", fontsize=11)
+    ax.set_title(f"Same check on every cluster ({len(usable)} clusters)\n"
+                 f"◆ = the example cluster,  number = median", fontsize=11)
     ax.legend(loc="lower right", fontsize=8, framealpha=.9)
     ax.grid(alpha=.25, axis="y")
 
@@ -435,10 +465,10 @@ def main() -> None:
         ax.plot(np.arange(1, v.size + 1) / v.size, v, lw=2.2, color=col, label=lb)
     ax.plot([0, 1], [0, 1], color="0.35", lw=1.2, ls="--", label="Gaussian (exact)")
     ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.set_aspect("equal")
-    ax.set_xlabel("expected quantile (Gaussian cell)")
+    ax.set_xlabel("expected quantile (Gaussian cluster)")
     ax.set_ylabel("observed Mahalanobis PIT")
-    ax.set_title(f"Mahalanobis PP, pooled over {len(usable)} cells\n"
-                 f"thin lines = individual cells (full cov)", fontsize=11)
+    ax.set_title(f"Mahalanobis PP, pooled over {len(usable)} clusters\n"
+                 f"thin lines = individual clusters (full cov)", fontsize=11)
     ax.legend(loc="upper left", fontsize=9, framealpha=.9)
     ax.grid(alpha=.25)
 
@@ -452,9 +482,9 @@ def main() -> None:
     ax.axvline(med_j, color="crimson", lw=2.0)
     ax.axvline(med_chance, color="0.35", lw=1.6, ls="--",
                label=f"chance level  {med_chance:.3f}")
-    ax.set_xlabel("|correlation| between state dims, within cell")
+    ax.set_xlabel("|correlation| between state dims, within cluster")
     ax.set_ylabel("count")
-    ax.set_title(f"Within-cell correlations ({rj.size + rt.size:,} pairs, all cells)",
+    ax.set_title(f"Within-cluster correlations ({rj.size + rt.size:,} pairs, all clusters)",
                  fontsize=11)
     ax.legend(fontsize=8.5, framealpha=.9)
 
@@ -466,11 +496,11 @@ def main() -> None:
     sc = ax.scatter(ksf_c, ksd_c, s=8 + 0.55 * n_c, c=n_c, cmap="viridis",
                     alpha=.80, edgecolors="none")
     ax.scatter([ksf_c[ci]], [ksd_c[ci]], s=90, facecolors="none", edgecolors="crimson",
-               linewidths=2.0, zorder=4, label=f"example cell {cell}")
-    fig.colorbar(sc, ax=ax, fraction=.046, label="samples in cell")
+               linewidths=2.0, zorder=4, label=f"example cluster {cell}")
+    fig.colorbar(sc, ax=ax, fraction=.046, label="samples in cluster")
     ax.set_xlim(0, lim); ax.set_ylim(0, lim); ax.set_aspect("equal")
     ax.set_xlabel("KS with full covariance"); ax.set_ylabel("KS with diagonal only")
-    ax.set_title(f"Per cell: diagonal is worse in {diag_worse}/{len(usable)} cells\n"
+    ax.set_title(f"Per cluster: diagonal is worse in {diag_worse}/{len(usable)} clusters\n"
                  f"(above the line = full covariance wins)", fontsize=11)
     ax.legend(loc="lower right", fontsize=9, framealpha=.9)
     ax.grid(alpha=.25)
@@ -480,17 +510,19 @@ def main() -> None:
     verdict_d = ("adequate" if diag_worse < len(usable) * 0.6 and med_j < 2 * med_chance
                  else "not adequate")
     fig.suptitle(
-        f"Codebook cell interior (state, {D}-dim) — {a.suite} task {a.task}, "
-        f"N={N}, K={a.codebook_k}->K_eff={K_eff}, {len(usable)} cells diagnosed\n"
+        f"Codebook cluster interior (state, {D}-dim) — {a.suite} task {a.task}, "
+        f"N={N}, K={a.codebook_k}->K_eff={K_eff}, {len(usable)} clusters diagnosed\n"
         f"ellipses = the Gaussian l2_codebook actually samples from,  points = the real data\n"
-        f"Q1 is a cell Gaussian: {verdict_g} (pooled KS {ks_full:.3f})   "
+        f"Q1 is a cluster Gaussian: {verdict_g} (pooled KS {ks_full:.3f})   "
         f"Q2 is it diagonal: {verdict_d} "
-        f"(diag worse in {diag_worse}/{len(usable)} cells, median |r| {med_j:.3f})",
+        f"(diag worse in {diag_worse}/{len(usable)} clusters, median |r| {med_j:.3f})",
         fontsize=12, y=.965)
 
     tag = f"task{a.task}_k{a.codebook_k}"
     fp = out / f"state_gauss_{tag}.png"
     fig.savefig(fp, dpi=140)
+    if a.pdf:
+        fig.savefig(fp.with_suffix(".pdf"))
     plt.close(fig)
 
     # ═════════════════════ 셀 격자 그림 ══════════════════════════════════════
@@ -499,61 +531,131 @@ def main() -> None:
     fp_grid = None
     if a.grid > 0:
         gs = a.seed if a.grid_seed < 0 else a.grid_seed
-        pick_n = min(a.grid, len(usable))
-        gsel = sorted(np.random.default_rng(gs).choice(np.array(usable), pick_n,
-                                                       replace=False).tolist())
-        ncol = 3 if pick_n > 2 else pick_n
+        THEORY = (0.3935, 0.8647, 0.9889)     # 2D 가우시안의 1σ/2σ/3σ 이론 포함률
+        only_full = a.grid_models == "full"
+        if a.grid_cells.strip():
+            want = [int(x) for x in a.grid_cells.replace(",", " ").split()]
+            miss = [k for k in want if k not in usable]
+            if miss:
+                raise SystemExit(f"--grid_cells 에 진단 불가 셀이 있다: {miss} "
+                                 f"(가능한 셀 {len(usable)}개)")
+            gsel, pick_n = sorted(want), len(want)
+            gpick_txt = f"clusters {', '.join(str(k) for k in gsel)} of {len(usable)}"
+        elif a.grid_pick == "gaussian":
+            # 실제 점의 포함률이 이론값에 가장 가까운 셀. 표본이 적은 셀은
+            # 포함률이 요동쳐 우연히 맞을 수 있으므로 --grid_min_n 으로 거른다.
+            cand = [k for k in usable if cnt[k] >= a.grid_min_n] or list(usable)
+            scored = []
+            for k in cand:
+                qk, Mf, _ = cell_models(s_np[lab == k], a.cov_ridge, a.plane)
+                fk = cov_inside(qk, Mf)
+                scored.append((sum(abs(fk[i] - THEORY[i]) for i in range(3)), k))
+            scored.sort()
+            pick_n = min(a.grid, len(scored))
+            gsel = sorted(k for _, k in scored[:pick_n])
+            gpick_txt = (f"{pick_n} clusters whose 1σ/2σ/3σ coverage is closest to "
+                         f"Gaussian  (n≥{a.grid_min_n}, {len(cand)} eligible)")
+        else:
+            pick_n = min(a.grid, len(usable))
+            gsel = sorted(np.random.default_rng(gs).choice(np.array(usable), pick_n,
+                                                           replace=False).tolist())
+            gpick_txt = (f"{pick_n} clusters drawn at random out of {len(usable)}"
+                         if a.grid_hide_seed else
+                         f"{pick_n} clusters drawn at random (seed {gs}) out of {len(usable)}")
+        ncol = a.grid_cols if a.grid_cols > 0 else (2 if pick_n == 4 else
+                                                    (3 if pick_n > 2 else pick_n))
         nrow = int(np.ceil(pick_n / ncol))
-        fh = 4.5 * nrow + 1.9                       # 제목/범례용 여백을 인치로 확보
-        fg, gaxes = plt.subplots(nrow, ncol, figsize=(4.6 * ncol, fh), squeeze=False)
-        fg.subplots_adjust(left=.06, right=.985, top=1 - 1.05 / fh,
-                           bottom=1.05 / fh, wspace=.24, hspace=.30)
-        gmed = []
-        for i, k in enumerate(gsel):
-            ax = gaxes[i // ncol][i % ncol]
+        # 글자 크기는 여기 하나로 잡는다 (제목/눈금/축/패널상자/범례/전체제목).
+        FS_TT, FS_TK, FS_AX, FS_BOX, FS_LG, FS_SUP = 13.0, 11.0, 12.5, 10.5, 12.0, 13.5
+
+        # 패널 내용을 먼저 계산한다 — 제목 줄 수(=위 여백)가 n_beats 에 달려 있고,
+        # 여백을 확정한 뒤에야 figure 를 만들 수 있다.
+        panels = []
+        for k in gsel:
             qk, Mf, Md = cell_models(s_np[lab == k], a.cov_ridge, a.plane)
-            fk, dk = cov_inside(qk, Mf), cov_inside(qk, Md)
-            gmed.append((k, fk, dk))
-            ax.scatter(qk[:, 0], qk[:, 1], s=11, alpha=.55, color="#3b5f86",
+            panels.append((k, qk, Mf, Md, cov_inside(qk, Mf), cov_inside(qk, Md)))
+        n_beats = sum(1 for *_, fk, dk in panels
+                      if abs(fk[1] - .865) < abs(dk[1] - .865))
+
+        # 범례 항목도 먼저 만든다 — 줄 수가 아래 여백을 정한다.
+        h, lb = [], []
+        if not only_full:
+            h.append(plt.Line2D([], [], color="#c2410c", lw=1.8))
+            lb.append("diagonal model  N(mu, diag sig^2)  = what l2_codebook uses")
+        h.append(plt.Line2D([], [], color="#1a7f37", lw=1.8))
+        lb.append("modelled Gaussian  N(mu, Sigma)   1σ solid / 2σ dashed / 3σ dotted")
+        h.append(plt.Line2D([], [], ls="none", marker="o", ms=5, color="#3b5f86"))
+        lb.append("real frames in the cluster")
+        # 한 줄에 다 들어가는 폭인지 어림한다 (문자당 0.0084 x fontsize 인치 + 핸들).
+        fw = 4.3 * ncol
+        w_lg = sum(len(x) for x in lb) * 0.0084 * FS_LG + 0.55 * len(lb)
+        ncol_lg = len(lb) if w_lg <= fw - 0.4 else 1
+        row_lg = int(np.ceil(len(lb) / ncol_lg))
+
+        # 제목 — 길면 접는다. 예전에는 한 줄에 우겨넣느라 폰트가 9pt 까지 줄었다.
+        lines = [a.grid_title or "Modelled Gaussian vs real points",
+                 a.grid_subtitle or
+                 (f"{a.suite} task {a.task}, K_eff={K_eff}, "
+                  f"{'cluster PCA' if a.plane == 'pca' else 'max-discrepancy'} plane"),
+                 gpick_txt]
+        if a.grid_cells.strip() and a.grid_title:
+            lines = [a.grid_title, lines[1]]
+        if not only_full:
+            lines[-1] += (f"   ·   full covariance closer at 2σ in "
+                          f"{n_beats}/{pick_n} of them")
+        maxch = max(24, int(0.94 * fw / (0.0084 * FS_SUP)))
+        lines = [w for x in lines for w in (textwrap.wrap(x, maxch) or [""])]
+        fs = min(FS_SUP, 0.94 * fw / (0.0084 * max(len(x) for x in lines)))
+
+        # 여백은 전부 인치로 잡는다. 범례는 x축 라벨 바로 밑에 붙인다 — 그림 맨
+        # 아래에 두면 패널과 범례 사이가 텅 빈다.
+        LG_GAP = 0.58                     # 축 아래 ~ 범례 위 (눈금+x라벨 자리)
+        top_in = 0.22 + 0.30 * len(lines)
+        bot_in = LG_GAP + 0.30 * row_lg + 0.08
+        left_in, right_in = 0.80, 0.14
+        # 패널을 정사각형으로 만든다. aspect="equal" 이라 상자가 세로로 길면
+        # 데이터가 아니라 빈 여백만 늘어난다.
+        WSP, HSP = .10, .26
+        ax_w = (fw - left_in - right_in) / (ncol + WSP * (ncol - 1))
+        fh = ax_w * nrow + top_in + bot_in
+        fg, gaxes = plt.subplots(nrow, ncol, figsize=(fw, fh), squeeze=False)
+        fg.subplots_adjust(left=left_in / fw, right=1 - right_in / fw,
+                           top=1 - top_in / fh, bottom=bot_in / fh,
+                           wspace=WSP, hspace=HSP)
+        for i, (k, qk, Mf, Md, fk, dk) in enumerate(panels):
+            ax = gaxes[i // ncol][i % ncol]
+            ax.scatter(qk[:, 0], qk[:, 1], s=13, alpha=.55, color="#3b5f86",
                        edgecolors="none", zorder=2)
             for k_, ls in ((1, "-"), (2, "--"), (3, ":")):
-                ellipse_cov(ax, Md, k_, ec="#c2410c", lw=1.6, ls=ls, zorder=3)
+                if not only_full:
+                    ellipse_cov(ax, Md, k_, ec="#c2410c", lw=1.6, ls=ls, zorder=3)
                 ellipse_cov(ax, Mf, k_, ec="#1a7f37", lw=1.6, ls=ls, zorder=3)
             ax.text(.02, .98,
                     "in 1σ/2σ/3σ  (39/86/99)\n"
-                    f"diag {dk[0]*100:5.1f}{dk[1]*100:6.1f}{dk[2]*100:6.1f}\n"
-                    f"full {fk[0]*100:5.1f}{fk[1]*100:6.1f}{fk[2]*100:6.1f}",
-                    transform=ax.transAxes, va="top", fontsize=8.2,
+                    + ("" if only_full else
+                       f"diag {dk[0]*100:5.1f}{dk[1]*100:6.1f}{dk[2]*100:6.1f}\n")
+                    + f"{'real' if only_full else 'full'} "
+                      f"{fk[0]*100:5.1f}{fk[1]*100:6.1f}{fk[2]*100:6.1f}",
+                    transform=ax.transAxes, va="top", fontsize=FS_BOX,
                     family="monospace",
-                    bbox=dict(fc="white", ec="0.75", alpha=.88, pad=2.5))
-            ax.set_title(f"cell {k}   n={cnt[k]}   KS_full={ksf_c[usable.index(k)]:.3f}",
-                         fontsize=10)
+                    bbox=dict(fc="white", ec="0.75", alpha=.88, pad=3.0))
+            ax.set_title(f"cluster {k}   n={cnt[k]}", fontsize=FS_TT, pad=6)
             ax.set_aspect("equal", adjustable="datalim")
-            ax.tick_params(labelsize=8)
+            ax.tick_params(labelsize=FS_TK)
             if i // ncol == nrow - 1:
-                ax.set_xlabel("axis 1", fontsize=9)
+                ax.set_xlabel("axis 1", fontsize=FS_AX, labelpad=2)
             if i % ncol == 0:
-                ax.set_ylabel("axis 2", fontsize=9)
+                ax.set_ylabel("axis 2", fontsize=FS_AX, labelpad=2)
         for j in range(pick_n, nrow * ncol):
             gaxes[j // ncol][j % ncol].axis("off")
-        h = [plt.Line2D([], [], color="#c2410c", lw=1.8),
-             plt.Line2D([], [], color="#1a7f37", lw=1.8),
-             plt.Line2D([], [], ls="none", marker="o", ms=4, color="#3b5f86")]
-        fg.legend(h, ["diagonal model  N(mu, diag sig^2)  = what l2_codebook uses",
-                      "full covariance model  = --full_cov_s",
-                      "real frames in the cell"],
-                  loc="lower center", ncol=3, fontsize=9, frameon=False,
-                  bbox_to_anchor=(.5, .16 / fh))
-        n_beats = sum(1 for _, fk, dk in gmed if abs(fk[1] - .865) < abs(dk[1] - .865))
-        fg.suptitle(
-            f"Modelled Gaussian vs real points — {pick_n} cells drawn at random "
-            f"(seed {gs}) out of {len(usable)}\n"
-            f"{a.suite} task {a.task}, K_eff={K_eff}, "
-            f"{'cell PCA' if a.plane == 'pca' else 'max-discrepancy'} plane"
-            f"   ·   full covariance closer at 2σ in {n_beats}/{pick_n} of them",
-            fontsize=12.5, y=1 - .22 / fh)
+        fg.legend(h, lb, loc="upper center", ncol=ncol_lg, fontsize=FS_LG,
+                  frameon=False, labelspacing=.32, handlelength=2.2,
+                  bbox_to_anchor=(.5, (bot_in - LG_GAP) / fh))
+        fg.suptitle("\n".join(lines), fontsize=fs, y=1 - .18 / fh)
         fp_grid = out / f"state_gauss_cells_{tag}.png"
         fg.savefig(fp_grid, dpi=140)
+        if a.pdf:
+            fg.savefig(fp_grid.with_suffix(".pdf"))
         plt.close(fg)
 
     # ── 보고 ─────────────────────────────────────────────────────────────────

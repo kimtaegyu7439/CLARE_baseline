@@ -1,0 +1,321 @@
+#!/usr/bin/env python
+"""L2_V6 — Directional-Error-Aware (DEA) 앵커 손실.
+
+    python L2_V6.py --anchor_form dea     --suite libero_goal ...   # 제안 방식
+    python L2_V6.py --anchor_form sqerr   ...                       # 균일 제곱오차
+    python L2_V6.py --anchor_form unifmd  ...                       # 균일 크기-방향
+
+════════════════════════════════════════════════════════════════════════════
+무엇이 달라지는가
+════════════════════════════════════════════════════════════════════════════
+속도 벡터를 크기와 방향으로 쪼개 따로 감독한다. 과거 태스크 j, 시점 t, 청크 h 에서
+
+    v_θ = r_θ u_θ ,  v̄ = r̄ ū      (r = ‖v‖₂, ‖u‖₂ = 1)
+    m_j = (r_θ,j − r̄_j)²           크기 오차
+    e_j = 1 − u_θ,j·ū_j ∈ [0,2]    방향 오차
+
+세 팔은 **e_j 의 계수만** 다르다 (노트 2절 표 그대로):
+
+    팔        m_j 계수    e_j 계수
+    sqerr     1/N        2 r_θ,j r̄_j / N      ← ‖v_θ−v̄‖² 와 항등. 즉 MSE
+    unifmd    1/N        β / N                 ← 크기·방향을 분리하고 균일 배분
+    dea       1/N        β w_j  (detach)       ← 방향 예산을 오차 큰 태스크로
+
+    w_j = sg[ (e_j + ε_w) / (Σ_m e_m + N ε_w) ],   Σ_j w_j = 1
+
+    L_anchor = (1/H) Σ_h [ (1/N) Σ_j m_j + β Σ_j w_j e_j ]
+    L        = L_FM + λ · L_anchor
+
+════════════════════════════════════════════════════════════════════════════
+구현상 알아둘 것
+════════════════════════════════════════════════════════════════════════════
+★ w_j 는 **태스크 축에 걸쳐** 정규화된다. 그래서 어떤 j 의 손실을 역전파하기
+  전에 **모든 j 의 e_j 를 먼저 알아야** 한다. 기존 chunk backward(한 태스크씩
+  계산하고 즉시 backward)와 양립하지 않는다. 그래서 dea 는 2-pass 로 돈다:
+
+      pass 1 (no_grad)  모든 j 의 e_j 를 구해 w_j 를 만든다
+      pass 2 (grad)     j 마다 다시 계산해 β·w_j·e_j + m_j 를 backward
+
+  학생 forward 가 2 배다. sqerr/unifmd 는 가중이 태스크에 의존하지 않아 1-pass 다.
+  pass 1 에서 만든 x_j·cond_T·v̄ 는 재사용하므로 **teacher forward 는 늘지 않는다**.
+
+★ 1/N 정규화. 기존 V4/V5 는 과거 태스크마다 λ 를 걸고 즉시 backward 해서 실효
+  가중이 과거 수에 비례하는 **합**이었다(스테이지 9 에서 λ 의 9 배). 노트는 1/N
+  **평균**이라 여기서는 N 으로 나눈다. --anchor_reduce sum 으로 옛 거동을 고를 수 있다.
+
+★ 근0 teacher 마스킹. r̄ 가 0 에 가까우면 ū 가 정의되지 않는다. 그런 (t,h,j) 는
+  방향 항에서 빼고 남은 태스크로 w 를 다시 정규화한다(노트의 edge case 지침).
+  크기 항 m_j 는 전 태스크에 그대로 둔다.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import time
+from pathlib import Path
+
+import torch
+
+import L2_V4_seq as B1
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  크기 / 방향 오차
+# ═════════════════════════════════════════════════════════════════════════════
+def split_mag_dir(v_s: torch.Tensor, v_t: torch.Tensor, pose_dims: int | None,
+                  eps: float = 1e-8):
+    """(B,H,A) 두 개 -> (m, e, r_s, r_t, valid) 각 (B,H).
+
+    pose_dims 를 주면 그 앞쪽 축만 쓴다(gripper 제외). 노트의 v 는 "같은 정규화
+    액션 좌표"의 벡터라 pose/gripper 를 섞어도 되지만, 이 코드베이스의 앵커는
+    줄곧 pose 6 축만 가중해 왔으므로 기본을 그에 맞춘다.
+    """
+    P = v_s.shape[-1] if pose_dims is None else pose_dims
+    a, b = v_s[..., :P], v_t[..., :P]
+    r_s = a.norm(dim=-1)                              # (B,H)
+    r_t = b.norm(dim=-1)                              # (B,H)
+    m = (r_s - r_t).pow(2)                            # (B,H)
+    # 방향은 단위벡터 내적. r 이 0 이면 정의되지 않으므로 eps 로 막고 valid 로 뺀다.
+    cos = (a * b).sum(-1) / (r_s.clamp_min(eps) * r_t.clamp_min(eps))
+    e = 1.0 - cos.clamp(-1.0, 1.0)                    # (B,H) ∈ [0,2]
+    valid = (r_t > eps) & (r_s > eps)                 # (B,H)
+    return m, e, r_s, r_t, valid
+
+
+def dea_weights(e_stack: torch.Tensor, valid_stack: torch.Tensor,
+                eps_w: float) -> torch.Tensor:
+    """(N,B,H) 방향오차 -> (N,B,H) 가중. **태스크 축(N)에 걸쳐** 합이 1.
+
+        w_j = (e_j + ε_w) / (Σ_m e_m + N_valid·ε_w)
+
+    노트 (2). ε_w 는 e 가 전부 0 일 때의 0/0 을 막고, 작을수록 적응이 세진다.
+    무효(근0 teacher) 태스크는 분자·분모에서 모두 빼고 유효 태스크로만 정규화한다.
+    """
+    e = torch.where(valid_stack, e_stack, torch.zeros_like(e_stack))
+    nv = valid_stack.sum(0).clamp_min(1)                      # (B,H) 유효 태스크 수
+    num = torch.where(valid_stack, e + eps_w, torch.zeros_like(e))   # (N,B,H)
+    den = e.sum(0) + nv * eps_w                               # (B,H)
+    return (num / den.clamp_min(1e-12)).detach()              # (N,B,H)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  앵커
+# ═════════════════════════════════════════════════════════════════════════════
+def to_action(v: torch.Tensor, x_t: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    """속도 -> 그 속도가 가리키는 끝점(액션). 선형 경로 v = (a − x_t)/(1−t) 의 역.
+
+        a = x_t + (1 − t) · v
+
+    왜 쓰는가: v 는 공통 노이즈 ε 를 품어(‖v‖≈‖ε‖) student·teacher 가 거의 같은
+    방향을 가리킨다. 각도가 t 에 따라 6 배까지 압축된다(t=0.1 에서 6.4x).
+    a 로 바꾸면 그 공통 성분이 빠져 각도가 t 와 무관해진다.
+    ★ m 과 e 를 **같은 공간**에서 뽑아야 한다. 섞으면
+      ‖·‖² = m + 2·r·r·e 항등식이 깨져 sqerr 이 MSE 를 복원하지 못한다.
+    """
+    return x_t + (1.0 - t).view(-1, 1, 1) * v
+
+
+class DEAAnchor(B1.L2CodebookAnchor):
+    """L2CodebookAnchor 의 loss() 만 교체한다.
+
+    코드북 생성·teacher 스냅샷·resume·수집은 전부 상속받는다. 바뀌는 것은
+    "student 와 teacher 의 속도 차이를 어떤 스칼라로 바꾸는가" 하나뿐이다.
+    """
+
+    name = "L2_V6_DEA"
+
+    def describe(self):
+        return (f"L2_V6/V7 — {self.a.anchor_form} 앵커 ({getattr(self.a, 'dir_space', 'vel')} 공간)  β={self.a.beta}, "
+                f"ε_w={self.a.eps_w}, reduce={self.a.anchor_reduce}, "
+                f"K={self.K}, λ_lvl={self.lam_lvl}, 코드북 {len(self.books)}개")
+
+    # ── 과거 태스크 하나의 질의 재료 ────────────────────────────────────────
+    def _query(self, policy, batch, x_t, t, k, instructions, j, n, st_shape, tcol, device):
+        """(x_j, cond_S 재료, v̄_j) 를 만든다. teacher 쪽은 전부 no_grad.
+
+        x_j·v̄ 는 pass 1/2 에서 **같은 값**이어야 하므로 pass 1 에서 만들어 캐시한다.
+        """
+        cb = self.books[j]
+        s_t, o_t = self._sample(cb, n)
+        s_t, o_t = s_t.detach(), o_t.detach()
+        bb = dict(batch)
+        bb["observation.state"] = s_t.view(st_shape).to(batch["observation.state"].dtype)
+        cls_j = o_t.reshape(-1, self.cls.shape[-1]).to(x_t.dtype)
+        past = [instructions[f"task{j}"]] * n
+
+        with torch.no_grad():
+            tl_T = B1.cond_tail(self.teacher, bb, cls_j)
+            cond_T = B1.make_cond(B1.encode_lang(self.teacher, past), tl_T)
+            eps0 = torch.randn_like(x_t)
+            a_hat = (eps0 + self._vel(self.teacher, eps0, torch.zeros_like(t), cond_T)).detach()
+            eps1 = torch.randn_like(x_t)
+            x_j = ((1 - tcol) * eps1 + tcol * a_hat).detach()
+            v_t = self._vel(self.teacher, x_j, t, cond_T).detach()
+        # a_hat 은 진단(그리퍼 전환 위치)에서 쓴다. 손실에는 관여하지 않는다.
+        return {"bb": bb, "cls_j": cls_j, "past": past, "x_j": x_j,
+                "v_t": v_t, "a_hat": a_hat}
+
+    @staticmethod
+    def _vel(pol, xx, tt, cond):
+        return pol.dit_flow.velocity_net(noisy_actions=xx, time=tt, global_cond=cond)
+
+    def _pair(self, v_s, q, t):
+        """(student, teacher) 벡터 쌍을 --dir_space 가 정한 공간에서 돌려준다."""
+        if getattr(self.a, "dir_space", "vel") == "act":
+            return to_action(v_s, q["x_j"], t), to_action(q["v_t"], q["x_j"], t)
+        return v_s, q["v_t"]
+
+    def _student_v(self, policy, q, t):
+        """학생 속도. cond 는 학생 인코더로 다시 만든다(그래프 필요)."""
+        tl_S = B1.cond_tail(policy, q["bb"], q["cls_j"])
+        cond_S = B1.make_cond(B1.encode_lang(policy, q["past"]), tl_S)
+        return self._vel(policy, q["x_j"], t, cond_S)
+
+    # ── 손실 ────────────────────────────────────────────────────────────────
+    def loss(self, policy, batch, tail, x_t, t, k, instructions, rng, args, device):
+        cls = getattr(self, "cls", None)
+        if cls is None:
+            cls = B1.rgb_cls(policy, batch)
+        self.cls = cls
+        self._collect(batch, cls, device)
+
+        if k == 0 or self.teacher is None or not self.books:
+            return torch.zeros((), device=device)
+
+        t0w = time.perf_counter()
+        n = batch["observation.state"].shape[0]
+        st_shape = batch["observation.state"].shape
+        tcol = t[:, None, None]
+        js = sorted(self.books)
+        N = len(js)
+        P = getattr(self.a, "pose_dims", None) or B1.POSE_DIMS
+        form = self.a.anchor_form
+        beta = self.a.beta
+        # 노트 (3) 은 크기 항에만 1/N 이 붙는다 — 방향 항은 Σ_j w_j = 1 이라
+        # 가중 자체가 평균 역할을 하므로 1/N 을 또 붙이지 않는다.
+        # sum 은 기존 V4/V5 거동(과거 수에 비례)을 쓰고 싶을 때의 선택지다.
+        inv_N = (1.0 / N) if self.a.anchor_reduce == "mean" else 1.0
+
+        # ── pass 1: 질의 재료 + (dea 면) 모든 e_j ──────────────────────────
+        qs = [self._query(policy, batch, x_t, t, k, instructions, j, n,
+                          st_shape, tcol, device) for j in js]
+        W = None
+        if form == "dea":
+            es, vs = [], []
+            with torch.no_grad():
+                for q in qs:
+                    v_s = self._student_v(policy, q, t)
+                    p_s, p_t = self._pair(v_s, q, t)
+                    _, e, _, _, va = split_mag_dir(p_s, p_t, P)
+                    es.append(e); vs.append(va)
+            W = dea_weights(torch.stack(es), torch.stack(vs), self.a.eps_w)   # (N,B,H)
+
+        # ── pass 2: 태스크마다 손실을 만들고 즉시 backward (chunk) ─────────
+        logs = {"m": [], "e": [], "w": []}
+        for i, (j, q) in enumerate(zip(js, qs)):
+            v_s = self._student_v(policy, q, t)
+            p_s, p_t = self._pair(v_s, q, t)
+            m, e, r_s, r_t, valid = split_mag_dir(p_s, p_t, P)
+
+            # ── 노트 2절 표를 **그대로** 옮긴다 ────────────────────────────
+            #   팔        m_j 계수   e_j 계수
+            #   sqerr     1/N       2·r_θ·r̄ / N
+            #   unifmd    1/N       β / N
+            #   dea       1/N       β·w_j        <- Σ_j w_j = 1 이라 /N 이 없다
+            if form == "sqerr":
+                coef = (2.0 * r_s * r_t).detach() * inv_N
+            elif form == "unifmd":
+                coef = torch.full_like(e, beta * inv_N)
+            elif form == "dea":
+                coef = beta * W[i]
+            else:
+                raise ValueError(f"알 수 없는 anchor_form: {form}")
+
+            # 크기 항은 전 태스크·전 (t,h) 에 그대로. 노트: "Keep magnitude
+            # retention over all N tasks."
+            L_m = inv_N * m.mean()
+            L_e = torch.where(valid, coef * e, torch.zeros_like(e)).mean()
+
+            (B1.LAMBDA_ANCHOR * self.lam_lvl * (L_m + L_e)).backward()
+
+            logs["m"].append(float(m.mean().detach()))
+            logs["e"].append(float(e[valid].mean().detach()) if valid.any() else 0.0)
+            if W is not None:
+                logs["w"].append(float(W[i].mean()))
+
+        self.step += 1
+        self.t_anchor += time.perf_counter() - t0w
+        if self.step % self.a.log_every_anchor == 0:
+            rec = {"task": k, "step": self.step, "form": form, "N": N,
+                   "m_mean": sum(logs["m"]) / N, "e_mean": sum(logs["e"]) / N,
+                   "w_mean": (sum(logs["w"]) / N) if logs["w"] else None,
+                   "w_max": max(logs["w"]) if logs["w"] else None,
+                   "ms_per_step": 1000 * self.t_anchor / max(self.step, 1)}
+            self.log.write(json.dumps(rec) + "\n"); self.log.flush()
+            logging.info(f"[V6][{form}] k={k} step={self.step:5d} "
+                         f"m={rec['m_mean']:.4f} e={rec['e_mean']:.4f} "
+                         + (f"w={rec['w_mean']:.3f}/max {rec['w_max']:.3f} " if logs["w"] else "")
+                         + f"ms/step={rec['ms_per_step']:.1f}")
+        # 이미 backward 했다. 반환은 로그용(그래프 없음).
+        return torch.tensor(sum(logs["m"]) / N + sum(logs["e"]) / N, device=device)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  메인 — B1 의 CLI 를 그대로 쓰고 V6 인자만 더한다
+# ═════════════════════════════════════════════════════════════════════════════
+def main() -> None:
+    import argparse
+    import sys
+
+    # B1.parse_args 를 그대로 쓰되 V6 전용 인자를 덧붙인다.
+    orig = B1.parse_args
+
+    def parse_v6():
+        # B1 의 파서를 만들고 인자를 추가한 뒤 파싱한다.
+        p = argparse.ArgumentParser(add_help=False)
+        p.add_argument("--anchor_form", choices=["dea", "sqerr", "unifmd"], default="dea",
+                       help="dea = 방향오차 인지 가중(제안), sqerr = 균일 제곱오차(=MSE), "
+                            "unifmd = 균일 크기-방향 분리")
+        p.add_argument("--beta", type=float, default=2.0,
+                       help="방향 항의 세기. 노트: β ≈ 2r₀² 가 teacher 노름 r₀ 근처의 "
+                            "국소 MSE 보정이고, β=2 는 단위 노름 가정에 해당한다.")
+        p.add_argument("--eps_w", type=float, default=1e-3,
+                       help="w_j 의 0/0 방지 상수. 크면 균일 가중에 가까워진다.")
+        p.add_argument("--dir_space", choices=["vel", "act"], default="vel",
+                       help="vel = 속도 벡터로 m·e 를 분해(노트 그대로). "
+                            "act = 끝점 액션 a = x_t + (1−t)v 로 분해 — 공통 노이즈가 "
+                            "빠져 각도가 t 와 무관해진다. m 과 e 는 항상 같은 공간이다.")
+        p.add_argument("--anchor_reduce", choices=["mean", "sum"], default="mean",
+                       help="mean = 과거 태스크에 1/N (노트 정의). "
+                            "sum = 기존 V4/V5 거동(과거 수에 비례).")
+        known, rest = p.parse_known_args()
+        sys.argv = [sys.argv[0]] + rest
+        args = orig()
+        for kk, vv in vars(known).items():
+            setattr(args, kk, vv)
+        return args
+
+    args = parse_v6()
+    B1._forbid_time_bin()
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    anchor = DEAAnchor(args)
+
+    json.dump({
+        "arm": f"L2_V6 — {args.anchor_form}",
+        "anchor_form": args.anchor_form, "beta": args.beta, "eps_w": args.eps_w,
+        "dir_space": args.dir_space,
+        "anchor_reduce": args.anchor_reduce,
+        "sampler_mode": args.sampler_mode, "codebook_k": args.codebook_k,
+        "lambda_level": args.lambda_level, "seed": args.seed, "eval_seed": args.eval_seed,
+        "eval_episodes": args.eval_episodes, "steps_per_task": args.steps_per_task,
+        "note": "Directional-Error-Aware Anchor Loss. m=(r_s−r_t)², e=1−cos. "
+                "e 계수: sqerr 2r_s·r_t/N, unifmd β/N, dea β·w_j (detach).",
+    }, (out_dir / "v6_config.json").open("w"), indent=2, ensure_ascii=False)
+
+    logging.info(f"[V6] {anchor.describe()}")
+    B1._train_loop(args, anchor)
+
+
+if __name__ == "__main__":
+    main()

@@ -26,6 +26,10 @@ wandb
 # Data
 data
 outputs
+# 실험 산출물 — 체크포인트·롤아웃·코드북. 디스크에만 두고 git 에는 올리지 않는다.
+# (results/ 는 safetensors 105G + 코드북 .pt 8G 를 품고 있어 add 가 멈춘다)
+results/
+real_robot/
 
 # Apple
 .DS_Store
