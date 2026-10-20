@@ -79,6 +79,11 @@ NTASK=${NTASK:-10}
 NW=${NW:-6}
 CODEBOOK_K=${CODEBOOK_K:-96}
 BETA=${BETA:-2.0}
+# 학습 배치. 기본 32 는 seed7 기준 런과 맞춘 값이다.
+# ★ 이걸 바꾸면 앵커도 같이 바뀐다 — 과거 태스크당 n=B 개를 뽑으므로
+#   (L2_V6.py:341) B=24 면 앵커 표본도 24 개가 된다. 새 태스크 표본 수만
+#   독립적으로 줄이는 설정이 아니다.
+BATCH=${BATCH:-32}
 EPS_W=${EPS_W:-1e-3}
 # 같은 form 을 다른 하이퍼로 또 돌릴 때 결과가 섞이지 않게 태그에 붙인다
 TAGSUF=${TAGSUF:-}
@@ -95,6 +100,9 @@ export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4} MKL_NUM_THREADS=${MKL_NUM_THREADS:-
 mkdir -p logs results
 [ -d "${PRETRAIN}" ] || { echo "사전학습 체크포인트 없음: ${PRETRAIN}"; exit 1; }
 
+# 배치가 기본값이 아니면 태그에 박는다 — 안 그러면 batch 24/32 결과가
+# 같은 폴더에 덮어써진다.
+[ "${BATCH}" != "32" ] && TAGSUF="${TAGSUF}_b${BATCH}bs"
 TAG="clare_${VER}_${FORM}${TAGSUF}_goal_seed${SEED}"
 OUT="results/${TAG}"
 CKPT="${HERE}/outputs/CLARE_V6/${VER}_${FORM}${TAGSUF}_seed${SEED}"
@@ -127,7 +135,7 @@ PRETRAIN_PATH="${PRETRAIN}" python -u "${ENTRY}" \
     --anchor_form "${FORM}" --beta "${BETA}" --eps_w "${EPS_W}" --anchor_reduce "${REDUCE}" \
     --arm v4 --suite "${SUITE}" --num_tasks "${NTASK}" \
     --episodes_per_task "${EPS}" --steps_per_task "${STEPS}" \
-    --batch_size 32 --num_workers "${NW}" \
+    --batch_size "${BATCH}" --num_workers "${NW}" \
     --codebook_k "${CODEBOOK_K}" --lambda_level 3.0 \
     --eval_episodes "${N_EVAL}" --eval_batch_size "${N_EVAL}" \
     --eval_after_each_task false \
