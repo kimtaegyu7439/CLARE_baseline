@@ -54,6 +54,8 @@ ARMS = [
     ("clare_v7_dea_b2.5_goal_seed7", "V7 dea β2.5", "β·w_j  (act)",
      "β=2.0 위쪽. 2.0 에서 1.5 로 내릴 때 5.4%p 가 꺾여 문턱을 확인한다."),
     ("clare_v7_dea_b3.0_goal_seed7", "V7 dea β3.0", "β·w_j  (act)", ""),
+    ("clare_v7_dea_b3.5_goal_seed7", "V7 dea β3.5", "β·w_j  (act)",
+     "β 를 3.0 위로 더 밀어본다. 액션 공간 보정값 2r₀²=1.35 보다 한참 크지만\n      seed7 에서 β3.0 이 AvgSR 91.2 로 가장 좋았어서 더 가도 되는지 본다."),
     ("clare_v6_dea_b0.5_goal_seed7", "V6 dea β0.5", "β·w_j  (vel)", ""),
     ("clare_v6_dea_b1.0_goal_seed7", "V6 dea β1.0", "β·w_j  (vel)", ""),
     ("clare_v6_dea_b1.5_goal_seed7", "V6 dea β1.5", "β·w_j  (vel)", ""),
@@ -64,6 +66,33 @@ ARMS = [
     ("clare_v10_dea_goal_seed7", "V10 dea m+e", "w^m_j / β·w^e_j (act)",
      "크기 항 계수를 1/N -> w^m_j ∝ m_j+ε_w 로. 방향과 같은 꼴, 통계만 m 이다."),
 ]
+def _discover_beta_arms(arms):
+    """results/ 에 있는 v6/v7 dea β 런 중 ARMS 에 없는 것을 자동으로 붙인다.
+
+    전에는 β 를 하나 추가할 때마다 이 목록에 손으로 넣어야 했고, 서버가
+    여러 대면 서버마다 넣어야 했다. 폴더 이름 규칙이 고정이므로
+    (clare_v{6,7}_dea_b<β>_goal_seed<N>) 긁어서 붙이는 게 맞다.
+    β 순으로 정렬해 넣는다 — 커브를 읽을 때 순서가 중요하다.
+    """
+    import re as _re
+    known = {a[0] for a in arms}
+    pat = _re.compile(r"^clare_(v6|v7)_dea_b([0-9.]+)_goal_seed(\d+)$")
+    found = []
+    for d in sorted(RES.glob("clare_v[67]_dea_b*_goal_seed*")):
+        if not d.is_dir() or d.name in known:
+            continue
+        m = pat.match(d.name)
+        if not m:
+            continue                      # _b24bs 같은 배치 변형은 여기 안 넣는다
+        ver, beta, seed = m.group(1), float(m.group(2)), m.group(3)
+        space = "act" if ver == "v7" else "vel"
+        found.append((beta, (d.name,
+                             f"{ver.upper()} dea \u03b2{m.group(2)}",
+                             f"\u03b2\u00b7w_j  ({space})",
+                             f"\uc790\ub3d9 \ud0d0\uc9c0 \u2014 seed{seed}")))
+    return arms + [a for _, a in sorted(found, key=lambda x: x[0])]
+
+
 REFS = [
     ("clare_v5_goal_c0.1_n50_seed7", "참고: V5 c=0.1",  "속도 역제곱 가중, 정규화 없음"),
     ("clare_mar_goal_median_seed7",  "참고: V4 median", "속도 역제곱 가중, 배치평균 1 정규화"),
@@ -156,7 +185,7 @@ def main() -> None:
     add("      L        = L_FM + λ · L_anchor")
     add("")
     add("      V6/V7 네 팔은 **e_j 의 계수만** 다르다. V8 은 방향 항 자체가 다르다:")
-    for _tag, name, coef, desc in ARMS:
+    for _tag, name, coef, desc in _discover_beta_arms(ARMS):
         add(f"        {name:<12}{coef:<18}{desc}")
     add("")
     add("      w_j = sg[ (e_j + ε_w) / (Σ_m e_m + N·ε_w) ],  Σ_j w_j = 1")
@@ -223,7 +252,8 @@ def main() -> None:
     add("")
 
     rows: list = []
-    for tag, name, _coef, desc in ARMS:
+    arms = _discover_beta_arms(ARMS)
+    for tag, name, _coef, desc in arms:
         block(tag, name, desc, L, rows)
     for tag, name, desc in REFS:
         block(tag, name, desc, L, rows)
