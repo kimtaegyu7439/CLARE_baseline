@@ -58,6 +58,39 @@ def discover(form: str, suite: str):
     return out
 
 
+def sr_matrix_block(tag: str, title: str, L: list) -> None:
+    """런 하나의 SR 행렬을 clare_v4_report.py 와 같은 양식으로 찍는다.
+
+    행 = 스테이지 k 학습 직후, 열 = 평가 태스크 t. CLARE 순차 셋팅이라
+    태스크 t 를 배운 스테이지가 t 이므로 아래 삼각형이다. 1 행(스테이지 0)은
+    앵커가 걸릴 과거가 없어 어떤 방법을 써도 같아야 정상이다.
+    """
+    d = RESULTS / tag if "RESULTS" in globals() else RES / tag
+    R, n = read_matrix(d)
+    L.append("-" * 92)
+    if not R:
+        L.append(f"{title}   — sr_matrix.csv 없음 (롤아웃 전)")
+        L.append("-" * 92)
+        L.append("")
+        return
+    filled = sum(1 for r in R for v in r if v is not None)
+    total = n * (n + 1) // 2
+    done = filled >= total
+    L.append(f"{title}   " + ("완료" if done else f"진행 중 {filled}/{total}칸"))
+    L.append("-" * 92)
+    L.append(f"{'stage':<8}" + "".join(f"{'t' + str(t):>6}" for t in range(n)))
+    for k in range(len(R)):
+        L.append(f"{k:<8}" + "".join(
+            (f"{R[k][t]:6.0f}" if R[k][t] is not None else f"{'':>6}")
+            for t in range(n)))
+    m = metrics(R, n)
+    f1 = lambda v: "-" if v is None else f"{v:.1f}"        # noqa: E731
+    fs = lambda v: "-" if v is None else f"{v:+.1f}"       # noqa: E731
+    L.append(f"  지표  AvgSR {f1(m['AvgSR'])}"
+             + (f" (행{m['row']})" if m["row"] is not None and not done else "")
+             + f"   FWT↑ {f1(m['FWT'])}   NBT↓ {fs(m['NBT'])}   AUC↑ {f1(m['AUC'])}")
+    L.append("")
+
 def train_progress(d):
     """sr_matrix.csv 가 없는 런의 학습 진행률. l2cb.jsonl 의 (task, step) 기준."""
     jl = d / "l2cb.jsonl"
@@ -162,6 +195,15 @@ def main() -> None:
             + fs(m["NBT"]) + f1(m["AUC"]) + f"   {state}")
     add("  * 진행 중인 런의 AvgSR 은 마지막 완성 행 기준이라 최종값이 아니다")
     add("")
+
+    # ── SR 행렬 ────────────────────────────────────────────────────────
+    add("=" * 92)
+    add("SR 행렬   행 = 스테이지 k 학습 직후, 열 = 평가 태스크 t")
+    add("=" * 92)
+    add("")
+    for r in recs:
+        sr_matrix_block(r["dir"].name,
+                        f"{r['ver']} β{r['beta']:g} seed{r['seed']}   ({r['dir'].name})", L)
 
     # ── 시드 집계 (완주한 런만) ─────────────────────────────────────────
     add("-" * 92)
