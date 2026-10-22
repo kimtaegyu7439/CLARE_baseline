@@ -72,16 +72,42 @@ cgroup_limit_gb() {
     [ -n "${tot}" ] && [ "${v}" -ge "${tot}" ] && { echo ""; return; }
     echo $(( v / 1073741824 ))
 }
+TRAIN_RSS_GB=${TRAIN_RSS_GB:-12}       # 학습 런 1 개의 호스트 RAM(워커 포함 추정)
 MEMGB=$(cgroup_limit_gb)
 if [ -n "${MEMGB}" ]; then
-    # 학습/시스템 몫으로 15% 는 남긴다
-    CAP=$(( MEMGB * 85 / 100 / ROLLOUT_RSS_GB ))
-    [ "${CAP}" -lt 1 ] && CAP=1
+    BUDGET=$(( MEMGB * 85 / 100 ))     # 시스템 몫 15% 는 남긴다
+
+    # ── 1 단계: 롤아웃만 도므로 롤아웃 RSS 로만 나눈다 ──────────────────
+    CAP=$(( BUDGET / ROLLOUT_RSS_GB )); [ "${CAP}" -lt 1 ] && CAP=1
     if [ "${ROLLOUT_PAR}" -gt "${CAP}" ]; then
-        echo "[rollout_first] 컨테이너 메모리 ${MEMGB}G / 롤아웃당 ${ROLLOUT_RSS_GB}G" \
+        echo "[rollout_first] 메모리 제한 ${MEMGB}G / 롤아웃당 ${ROLLOUT_RSS_GB}G" \
              "-> ROLLOUT_PAR ${ROLLOUT_PAR} 는 OOM 위험. ${CAP} 로 낮춘다." >&2
         ROLLOUT_PAR="${CAP}"
     fi
+
+    # ── 2 단계: 학습 (M-S) 개 + 롤아웃 S 개가 **같이** 떠 있을 수 있다 ──
+    #   런이 학습을 끝내면 바로 롤아웃으로 넘어가므로 둘이 공존한다.
+    #   최악 = (M-S)*TRAIN + S*ROLL <= BUDGET 를 만족하는 최대 M 을 찾는다.
+    #   (이걸 안 보고 M=8 로 뒀다가 롤아웃 5/8 이 OOM 으로 날아갔다.)
+    S="${ROLLOUT_PAR}"
+    while [ "${S}" -gt 1 ] && [ $(( S * ROLLOUT_RSS_GB )) -gt "${BUDGET}" ]; do
+        S=$(( S - 1 ))
+    done
+    MCAP="${S}"
+    while [ $(( (MCAP + 1 - S) * TRAIN_RSS_GB + S * ROLLOUT_RSS_GB )) -le "${BUDGET}" ]; do
+        MCAP=$(( MCAP + 1 ))
+        [ "${MCAP}" -ge 64 ] && break
+    done
+    [ "${MCAP}" -lt 1 ] && MCAP=1
+    if [ "${MAXJOBS}" -gt "${MCAP}" ]; then
+        echo "[rollout_first] 2 단계는 학습과 롤아웃이 공존한다." \
+             "최악 $(( (MAXJOBS - S) * TRAIN_RSS_GB + S * ROLLOUT_RSS_GB ))G > ${BUDGET}G" \
+             "-> MAXJOBS ${MAXJOBS} 를 ${MCAP} 로 낮춘다." >&2
+        MAXJOBS="${MCAP}"
+    fi
+    echo "[rollout_first] 메모리 ${MEMGB}G -> 예산 ${BUDGET}G," \
+         "ROLLOUT_PAR=${ROLLOUT_PAR}, MAXJOBS=${MAXJOBS}" \
+         "(롤아웃 ${ROLLOUT_RSS_GB}G/개, 학습 ${TRAIN_RSS_GB}G/개)" >&2
 fi
 MAXJOBS=${MAXJOBS:-8}              # 2 단계 동시 학습 런 수
 MIN_FREE_GB=${MIN_FREE_GB:-40}
