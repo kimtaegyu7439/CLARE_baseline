@@ -36,6 +36,14 @@ EVAL_SEED=${EVAL_SEED:-7}
 NW=${NW:-6}
 STEPS=${STEPS:-10000}
 ROLLOUT_PAR=${ROLLOUT_PAR:-4}      # 1 단계 동시 롤아웃 수
+# ★ 롤아웃 VRAM 은 환경 50 개를 띄우는 **처음 1 분에만** 약 22G 로 치솟고
+#   그 뒤에는 5.9G 로 떨어진다(실측). 그래서 시작을 충분히 어긋나게 하면
+#   피크가 겹치지 않아 동시 실행 수를 크게 올릴 수 있다.
+#     겹칠 때   8 x 22G = 176G  -> H200 143G 초과
+#     어긋나면  8 x 5.9G = 47G  -> 여유
+#   호스트 RAM 은 롤아웃당 32G 라 1T 서버에서 28 개까지 들어간다(제약 아님).
+#   CPU 는 롤아웃당 1.35 코어뿐이라 192 코어 서버에서 전혀 제약이 아니다.
+ROLLOUT_GAP=${ROLLOUT_GAP:-90}     # 1 단계 롤아웃 시작 간격(초). 피크 지속이 약 60s
 MAXJOBS=${MAXJOBS:-8}              # 2 단계 동시 학습 런 수
 MIN_FREE_GB=${MIN_FREE_GB:-40}
 GAP=${GAP:-20}
@@ -136,7 +144,7 @@ if [ "${PHASE}" = "all" ] || [ "${PHASE}" = "rollout" ]; then
             fi
             report
         ) &
-        running=$((running+1)); sleep 5
+        running=$((running+1)); sleep "${ROLLOUT_GAP}"
     done
     while [ "${running}" -gt 0 ]; do wait -n 2>/dev/null || true; running=$((running-1)); done
     ts "──── 1단계 끝 ────"
