@@ -25,6 +25,13 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; cd "${HERE}"
 
+# ★ 데이터셋/모델 경로. 이게 없으면 LeRobotDatasetMetadata 가 HF_LEROBOT_HOME
+#   아래에서 로컬 메타데이터를 못 찾고(기본 캐시를 본다) 허브로 가는데,
+#   HF_HUB_OFFLINE=1 이라 OfflineModeIsEnabled 로 죽는다.
+#   2 단계는 CLARE_V6_queue.sh 가 이걸 source 해서 멀쩡했고, 1 단계만 빠져 있었다.
+# shellcheck disable=SC1091
+source "${HERE}/bash/clare/env.sh" > /dev/null 2>&1 || true
+
 GPU=${GPU:-0}
 FORM=${FORM:-dea}
 VERS=${VERS:-"v7 v6"}
@@ -131,6 +138,9 @@ if [ "${PHASE}" = "all" ] || [ "${PHASE}" = "rollout" ]; then
         (
             export CUDA_VISIBLE_DEVICES="${GPU}" MUJOCO_EGL_DEVICE_ID="${GPU}" \
                    MUJOCO_GL=${MUJOCO_GL:-egl} HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+            # env.sh 가 export 한 값들(HF_LEROBOT_HOME, HF_HUB_CACHE, PRETRAIN_PATH)은
+            # 상속되지만, 서브셸에서 한 번 더 확인해 둔다.
+            [ -n "${HF_LEROBOT_HOME:-}" ] || source "${HERE}/bash/clare/env.sh" > /dev/null 2>&1
             python -u "${HERE}/CLARE_rollout_only.py" --ckpt_dir "${CKDIR}" \
                 --out "${HERE}/results/${TAG}" --suite "${SUITE}" --rows all \
                 --eval_episodes "${N_EVAL}" --eval_batch_size "${N_EVAL}" \
