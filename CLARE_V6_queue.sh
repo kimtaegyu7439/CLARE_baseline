@@ -193,5 +193,18 @@ python -u CLARE_rollout_only.py --ckpt_dir "${CKDIR}" --out "${OUT}" \
     --eval_seed "${EVAL_SEED}" >> "${LOG}" 2>&1
 rc=$?
 release_rollout_slot
-ts "◀ ${TAG} 롤아웃 exit=${rc}  ($(filled "${OUT}")/${NEED}칸)"
+FILLED=$(filled "${OUT}")
+ts "◀ ${TAG} 롤아웃 exit=${rc}  (${FILLED}/${NEED}칸)"
 python -u CLARE_V6_report.py > /dev/null 2>&1 && ts "   기록 -> results/direction error aware anchor_V6_SR.txt"
+
+# ★ 롤아웃이 한 칸도 못 채웠으면 실패다. 예전에는 여기서 리포트 생성이 마지막
+#   명령이라 그 종료코드(0)가 스크립트 종료코드가 됐고, 55 칸이 전부 None 인
+#   런이 exit=0 으로 보고됐다. 40 시간 학습해 놓고 실패를 못 알아챘다.
+#   (실제 사례: gym-libero 가 libero_goal 을 거부해 55 칸 전부 0 초 만에 None)
+if [ "${rc}" -ne 0 ] || [ "${FILLED}" -eq 0 ]; then
+    ts "✗ ${TAG} 롤아웃 실패 — 칸 ${FILLED}/${NEED}, exit=${rc}"
+    ts "   ${LOG} 에서 'SR rollout 실패' 를 찾아봐라. 체크포인트는 남아 있으므로"
+    ts "   환경을 고친 뒤 롤아웃만 다시 돌리면 된다(재학습 불필요)."
+    exit "$([ "${rc}" -ne 0 ] && echo "${rc}" || echo 3)"
+fi
+exit 0

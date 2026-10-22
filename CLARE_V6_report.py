@@ -76,16 +76,16 @@ def _discover_beta_arms(arms):
     """
     import re as _re
     known = {a[0] for a in arms}
-    pat = _re.compile(r"^clare_(v6|v7)_dea_b([0-9.]+)_goal_seed(\d+)$")
+    pat = _re.compile(r"^clare_(v6|v7|v11)_dea_b([0-9.]+)_goal_seed(\d+)$")
     found = []
-    for d in sorted(RES.glob("clare_v[67]_dea_b*_goal_seed*")):
+    for d in sorted(RES.glob("clare_v*_dea_b*_goal_seed*")):
         if not d.is_dir() or d.name in known:
             continue
         m = pat.match(d.name)
         if not m:
             continue                      # _b24bs 같은 배치 변형은 여기 안 넣는다
         ver, beta, seed = m.group(1), float(m.group(2)), m.group(3)
-        space = "act" if ver == "v7" else "vel"
+        space = "vel" if ver == "v6" else "act"   # v7, v11 은 액션 공간
         found.append((beta, (d.name,
                              f"{ver.upper()} dea \u03b2{m.group(2)}",
                              f"\u03b2\u00b7w_j  ({space})",
