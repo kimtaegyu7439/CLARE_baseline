@@ -51,6 +51,38 @@ ROLLOUT_PAR=${ROLLOUT_PAR:-4}      # 1 단계 동시 롤아웃 수
 #   호스트 RAM 은 롤아웃당 32G 라 1T 서버에서 28 개까지 들어간다(제약 아님).
 #   CPU 는 롤아웃당 1.35 코어뿐이라 192 코어 서버에서 전혀 제약이 아니다.
 ROLLOUT_GAP=${ROLLOUT_GAP:-90}     # 1 단계 롤아웃 시작 간격(초). 피크 지속이 약 60s
+ROLLOUT_RSS_GB=${ROLLOUT_RSS_GB:-26}   # 롤아웃 1 개의 호스트 RAM(실측 24G + 여유)
+
+# ★ 진짜 상한은 **컨테이너 메모리 제한**이지 free -g 가 아니다.
+#   쿠버네티스 파드에서 free 는 호스트 전체(예: 1007G)를 보여주지만 cgroup
+#   제한은 그보다 훨씬 작다. 롤아웃 하나가 RSS 24G 라, 제한을 모르고 8 개를
+#   띄우면 OOM 킬러가 exit=137 로 죽인다(실제로 5/8 이 그렇게 날아갔다).
+#   제한을 읽어 ROLLOUT_PAR 을 자동으로 깎는다. 못 읽으면 건드리지 않는다.
+cgroup_limit_gb() {
+    local v=""
+    for f in /sys/fs/cgroup/memory.max \
+             /sys/fs/cgroup/memory/memory.limit_in_bytes; do
+        [ -r "${f}" ] && v=$(cat "${f}" 2>/dev/null) && break
+    done
+    case "${v}" in
+        ''|max|*[!0-9]*) echo ""; return;;
+    esac
+    # 호스트 전체와 같으면 제한이 없는 것으로 본다
+    local tot; tot=$(awk '/MemTotal/{print $2*1024}' /proc/meminfo 2>/dev/null)
+    [ -n "${tot}" ] && [ "${v}" -ge "${tot}" ] && { echo ""; return; }
+    echo $(( v / 1073741824 ))
+}
+MEMGB=$(cgroup_limit_gb)
+if [ -n "${MEMGB}" ]; then
+    # 학습/시스템 몫으로 15% 는 남긴다
+    CAP=$(( MEMGB * 85 / 100 / ROLLOUT_RSS_GB ))
+    [ "${CAP}" -lt 1 ] && CAP=1
+    if [ "${ROLLOUT_PAR}" -gt "${CAP}" ]; then
+        echo "[rollout_first] 컨테이너 메모리 ${MEMGB}G / 롤아웃당 ${ROLLOUT_RSS_GB}G" \
+             "-> ROLLOUT_PAR ${ROLLOUT_PAR} 는 OOM 위험. ${CAP} 로 낮춘다." >&2
+        ROLLOUT_PAR="${CAP}"
+    fi
+fi
 MAXJOBS=${MAXJOBS:-8}              # 2 단계 동시 학습 런 수
 MIN_FREE_GB=${MIN_FREE_GB:-40}
 GAP=${GAP:-20}
@@ -148,7 +180,12 @@ if [ "${PHASE}" = "all" ] || [ "${PHASE}" = "rollout" ]; then
             rc=$?
             n=$(filled "results/${TAG}")
             if [ "${rc}" -ne 0 ] || [ "${n}" -eq 0 ]; then
-                ts "✗ [롤아웃] ${TAG} 실패 — ${n}/${NEED}칸, exit=${rc}  (logs/${TAG}.log 확인)"
+                if [ "${rc}" -eq 137 ]; then
+                    ts "✗ [롤아웃] ${TAG} OOM 으로 강제종료(exit=137) — 동시 실행 수를 줄여라"
+                    ts "   롤아웃 1 개가 RSS 약 ${ROLLOUT_RSS_GB}G 다. 현재 ROLLOUT_PAR=${ROLLOUT_PAR}."
+                else
+                    ts "✗ [롤아웃] ${TAG} 실패 — ${n}/${NEED}칸, exit=${rc}  (logs/${TAG}.log 확인)"
+                fi
             else
                 ts "◀ [롤아웃] ${TAG}  ${n}/${NEED}칸"
             fi
