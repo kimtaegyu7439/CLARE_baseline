@@ -44,6 +44,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -78,8 +79,13 @@ from lerobot.utils.train_utils import (                                # noqa: E
 )
 from lerobot.utils.utils import get_safe_torch_device, init_logging    # noqa: E402
 
-LOTUS_ROOT = Path("/home/sa090180/Datasets/lerobot/LOTUS_setting")
-MODEL_ROOT = Path("/home/sa090180/Models")
+# 경로는 환경변수를 먼저 보고, 없으면 서버1 의 기존 값을 쓴다 — 서버1 거동은
+# 그대로이고 다른 머신(쿠버네티스 파드 등)에서는 bash/clare/env.sh 가 세운
+# HF_LEROBOT_HOME / CLARE_MODEL_ROOT 를 따라간다.
+LOTUS_ROOT = Path(os.environ.get("LOTUS_DATA_ROOT")
+                  or Path(os.environ.get("HF_LEROBOT_HOME",
+                                         "/home/sa090180/Datasets/lerobot")) / "LOTUS_setting")
+MODEL_ROOT = Path(os.environ.get("CLARE_MODEL_ROOT", "/home/sa090180/Models"))
 SETTING_JSON = LOTUS_ROOT / "lotus_setting.json"
 LAMBDA_ANCHOR = 1.0       # L = L_FM + λ_a · L_anchor  (l2_codebook_id 와 같다)
 
