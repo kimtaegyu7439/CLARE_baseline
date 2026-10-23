@@ -265,6 +265,11 @@ def main() -> None:
     p.add_argument("--anchor_reduce", choices=["mean", "sum"], default="mean")
     p.add_argument("--pose_dims", type=int, default=0,
                    help="0 이면 LC.POSE_DIMS(6, gripper 제외). A 로 두면 전 축.")
+    p.add_argument("--skip_eval", action="store_true",
+                   help="롤아웃을 전부 건너뛰고 학습만 한다. 스테이지 체크포인트는 "
+                        "그대로 남으므로 Lotus_rollout_only.py 로 다른 GPU 에서 "
+                        "따로 SR 을 채울 수 있다. LIBERO-50 은 스테이지마다 50 칸을 "
+                        "돌아 롤아웃이 학습을 오래 막는데, 그걸 떼어내는 용도다.")
     p.add_argument("--selftest", action="store_true",
                    help="분해·가중 검증만 하고 끝낸다 (모델 불필요)")
     opt, rest = p.parse_known_args()
@@ -282,12 +287,22 @@ def main() -> None:
         argparse.ArgumentParser.parse_args = _orig
         ns = _orig(self, *a, **kw)
         for k, v in vars(opt).items():
+            # skip_eval 은 args 에 싣는다 — LC 가 vars(args) 를 config.json 에
+            # 덤프하므로(l.614), SR 의 빈 칸이 "롤아웃을 안 돌린 것"인지
+            # "롤아웃이 실패한 것"인지 나중에 구분할 수 있어야 한다.
             if k != "selftest":
                 setattr(ns, k, v)
         return ns
 
     argparse.ArgumentParser.parse_args = _patched
     LC.anchor_loss = make_anchor_loss(opt)
+    if opt.skip_eval:
+        # 학습 루프는 R[stage][t] = rollout_sr(...) 로 결과를 받아 적는다.
+        # None 을 돌려주면 그 칸이 빈 칸으로 남고(원래 실패 시 거동과 같다)
+        # write_report 도 그대로 돈다. 체크포인트 저장은 영향받지 않는다.
+        LC.rollout_sr = lambda *a, **k: None
+        logging.info("[Lotus_V7_dea] --skip_eval: 롤아웃 전부 건너뜀 "
+                     "(체크포인트만 남긴다)")
     logging.info(f"[Lotus_V7_dea] form={opt.anchor_form} β={opt.beta} "
                  f"ε_w={opt.eps_w} space={opt.dir_space} reduce={opt.anchor_reduce} "
                  f"P={opt.pose_dims or LC.POSE_DIMS}")
