@@ -70,7 +70,8 @@ export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 GPU=${GPU:?GPU 를 지정해라}
 FORM=${FORM:?FORM 을 지정해라 (dea|sqerr|unifmd)}
 SEED=${SEED:-7}
-SUITE=libero_goal
+# 스위트. 기존 런이 전부 libero_goal 이라 기본값은 그대로 두고 환경변수로 연다.
+SUITE=${SUITE:-libero_goal}
 STEPS=${STEPS:-10000}
 N_EVAL=${N_EVAL:-50}
 EVAL_SEED=${EVAL_SEED:-7}
@@ -107,7 +108,13 @@ mkdir -p logs results
 # 정규식(clare_<ver>_dea_b<β>_goal_seed<N>)과도 어긋난다.
 [ "${TAG_BATCH_SUFFIX:-1}" != "0" ] && [ "${BATCH}" != "32" ] \
     && TAGSUF="${TAGSUF}_b${BATCH}bs"
-TAG="clare_${VER}_${FORM}${TAGSUF}_goal_seed${SEED}"
+# 기존 태그는 ..._goal_seed.. 로 굳어 있다. TAG_SUITE=1 이면 TAGSUF 에 이미
+# 스위트가 들어 있다고 보고 중복 'goal' 을 넣지 않는다.
+if [ "${TAG_SUITE:-0}" = "1" ]; then
+    TAG="clare_${VER}_${FORM}${TAGSUF}_seed${SEED}"
+else
+    TAG="clare_${VER}_${FORM}${TAGSUF}_goal_seed${SEED}"
+fi
 OUT="results/${TAG}"
 CKPT="${HERE}/outputs/CLARE_V6/${VER}_${FORM}${TAGSUF}_seed${SEED}"
 LOG="logs/${TAG}.log"
