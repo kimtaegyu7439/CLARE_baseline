@@ -183,6 +183,14 @@ ts "◀ ${TAG} 학습 exit=${rc}"
 [ "${rc}" -ne 0 ] && { ts "   -> ${LOG} 확인"; exit "${rc}"; }
 
 # ── 2단계: 롤아웃 50회 ──────────────────────────────────────────────────
+# DO_ROLLOUT=0 이면 학습만 하고 끝낸다. 체크포인트가 남으므로 롤아웃은
+# 나중에 따로 돌릴 수 있다(bash/rollout_first.sh 의 1 단계).
+#   쓰는 경우: 그 서버의 EGL 이 GPU 를 못 써서 롤아웃이 CPU 소프트웨어
+#   렌더링으로 떨어질 때. 학습은 렌더링을 안 하므로 영향이 없다.
+if [ "${DO_ROLLOUT:-1}" = "0" ]; then
+    ts "⏭ ${TAG} 롤아웃 건너뜀 (DO_ROLLOUT=0) — 체크포인트는 ${CKPT} 에 있다"
+    exit 0
+fi
 CKDIR=$(ls -d "${CKPT}"/*_ours 2>/dev/null | head -1)
 [ -z "${CKDIR}" ] && { ts "   ★ 체크포인트 폴더 없음"; exit 1; }
 ts "▶ ${TAG} 롤아웃 ${N_EVAL}회 — 슬롯 대기"

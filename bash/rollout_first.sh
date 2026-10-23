@@ -95,6 +95,16 @@ if [ -n "${MEMGB}" ]; then
     #   런이 학습을 끝내면 바로 롤아웃으로 넘어가므로 둘이 공존한다.
     #   최악 = (M-S)*TRAIN + S*ROLL <= BUDGET 를 만족하는 최대 M 을 찾는다.
     #   (이걸 안 보고 M=8 로 뒀다가 롤아웃 5/8 이 OOM 으로 날아갔다.)
+    if [ "${DO_ROLLOUT:-1}" = "0" ]; then
+        # 학습만 돈다 — 롤아웃 몫을 빼고 학습 RSS 로만 나눈다
+        MCAP=$(( BUDGET / TRAIN_RSS_GB )); [ "${MCAP}" -lt 1 ] && MCAP=1
+        [ "${MAXJOBS}" -gt "${MCAP}" ] && {
+            echo "[rollout_first] DO_ROLLOUT=0 (학습만) -> MAXJOBS ${MAXJOBS} 를 ${MCAP} 로." >&2
+            MAXJOBS="${MCAP}"; }
+        echo "[rollout_first] 메모리 ${MEMGB}G -> 예산 ${BUDGET}G, 학습 전용," \
+             "MAXJOBS=${MAXJOBS} (학습 ${TRAIN_RSS_GB}G/개)" >&2
+        S=0
+    else
     S="${ROLLOUT_PAR}"
     while [ "${S}" -gt 1 ] && [ $(( S * ROLLOUT_RSS_GB )) -gt "${BUDGET}" ]; do
         S=$(( S - 1 ))
@@ -114,6 +124,7 @@ if [ -n "${MEMGB}" ]; then
     echo "[rollout_first] 메모리 ${MEMGB}G -> 예산 ${BUDGET}G," \
          "ROLLOUT_PAR=${ROLLOUT_PAR}, MAXJOBS=${MAXJOBS}" \
          "(롤아웃 ${ROLLOUT_RSS_GB}G/개, 학습 ${TRAIN_RSS_GB}G/개)" >&2
+    fi
 fi
 
 Q="${HERE}/logs/rollout_first.queue"
@@ -258,6 +269,7 @@ if [ "${PHASE}" = "all" ] || [ "${PHASE}" = "train" ]; then
             ENTRY="$(entry_of "${VER}")" VER="${VER}" TAGSUF="_b${BETA}" \
             STEPS="${STEPS}" NW="${NW}" N_EVAL="${N_EVAL}" EVAL_SEED="${EVAL_SEED}" \
             MIN_FREE_GB="${MIN_FREE_GB}" ROLLOUT_SLOTS="${ROLLOUT_PAR}" \
+            DO_ROLLOUT="${DO_ROLLOUT:-1}" \
             bash "${HERE}/CLARE_V6_queue.sh"
             ts "◀ [학습] ${TAG} exit=$?  ($(filled "results/${TAG}")/${NEED}칸)"
             report
