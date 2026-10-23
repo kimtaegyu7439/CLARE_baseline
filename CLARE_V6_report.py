@@ -76,7 +76,7 @@ def _discover_beta_arms(arms):
     """
     import re as _re
     known = {a[0] for a in arms}
-    pat = _re.compile(r"^clare_(v6|v7|v11)_dea_b([0-9.]+)_goal_seed(\d+)$")
+    pat = _re.compile(r"^clare_(v6|v7|v11|v12)_dea_b([0-9.]+)_goal_seed(\d+)$")
     found = []
     for d in sorted(RES.glob("clare_v*_dea_b*_goal_seed*")):
         if not d.is_dir() or d.name in known:

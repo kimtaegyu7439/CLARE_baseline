@@ -102,7 +102,11 @@ mkdir -p logs results
 
 # 배치가 기본값이 아니면 태그에 박는다 — 안 그러면 batch 24/32 결과가
 # 같은 폴더에 덮어써진다.
-[ "${BATCH}" != "32" ] && TAGSUF="${TAGSUF}_b${BATCH}bs"
+# TAG_BATCH_SUFFIX=0 이면 안 붙인다. 배치 분할이 **버전 정의에 포함된** 팔
+# (예: V12 는 항상 24 새 태스크 + 8 앵커)에서는 중복이고, 리포트의 태그
+# 정규식(clare_<ver>_dea_b<β>_goal_seed<N>)과도 어긋난다.
+[ "${TAG_BATCH_SUFFIX:-1}" != "0" ] && [ "${BATCH}" != "32" ] \
+    && TAGSUF="${TAGSUF}_b${BATCH}bs"
 TAG="clare_${VER}_${FORM}${TAGSUF}_goal_seed${SEED}"
 OUT="results/${TAG}"
 CKPT="${HERE}/outputs/CLARE_V6/${VER}_${FORM}${TAGSUF}_seed${SEED}"
@@ -168,7 +172,10 @@ FREE=$(df -BG --output=avail "${HERE}" | tail -1 | tr -dc '0-9')
 # ── 1단계: 학습 (롤아웃 없이) ───────────────────────────────────────────
 ts "▶ ${TAG} 학습  GPU ${GPU}  form=${FORM} β=${BETA} ε_w=${EPS_W} reduce=${REDUCE}"
 echo "════ $(date '+%F %T') 학습 시작 ${FORM} ════" >> "${LOG}"
-PRETRAIN_PATH="${PRETRAIN}" python -u "${ENTRY}" \
+# EXTRA_ARGS 는 팔마다 다른 인자를 붙일 때 쓴다 (예: V12 의 --anchor_rows).
+# 따옴표 없이 펼쳐야 여러 인자가 각각 전달된다.
+# shellcheck disable=SC2086
+PRETRAIN_PATH="${PRETRAIN}" python -u "${ENTRY}" ${EXTRA_ARGS:-} \
     --anchor_form "${FORM}" --beta "${BETA}" --eps_w "${EPS_W}" --anchor_reduce "${REDUCE}" \
     --arm v4 --suite "${SUITE}" --num_tasks "${NTASK}" \
     --episodes_per_task "${EPS}" --steps_per_task "${STEPS}" \
