@@ -72,6 +72,12 @@ cgroup_limit_gb() {
     [ -n "${tot}" ] && [ "${v}" -ge "${tot}" ] && { echo ""; return; }
     echo $(( v / 1073741824 ))
 }
+MAXJOBS=${MAXJOBS:-8}              # 2 단계 동시 학습 런 수
+MIN_FREE_GB=${MIN_FREE_GB:-40}
+GAP=${GAP:-20}
+PHASE=${PHASE:-all}                # all | rollout | train
+SUITE=${SUITE:-libero_goal}
+
 TRAIN_RSS_GB=${TRAIN_RSS_GB:-12}       # 학습 런 1 개의 호스트 RAM(워커 포함 추정)
 MEMGB=$(cgroup_limit_gb)
 if [ -n "${MEMGB}" ]; then
@@ -109,11 +115,6 @@ if [ -n "${MEMGB}" ]; then
          "ROLLOUT_PAR=${ROLLOUT_PAR}, MAXJOBS=${MAXJOBS}" \
          "(롤아웃 ${ROLLOUT_RSS_GB}G/개, 학습 ${TRAIN_RSS_GB}G/개)" >&2
 fi
-MAXJOBS=${MAXJOBS:-8}              # 2 단계 동시 학습 런 수
-MIN_FREE_GB=${MIN_FREE_GB:-40}
-GAP=${GAP:-20}
-PHASE=${PHASE:-all}                # all | rollout | train
-SUITE=${SUITE:-libero_goal}
 
 Q="${HERE}/logs/rollout_first.queue"
 mkdir -p logs results
