@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent
@@ -43,9 +44,28 @@ TETHER_DIR = {
     ("50", 42): "l2_codebook_v4_hard_sf_50_k96",
     ("50", 1000): "l2_codebook_v4_50_seed1000",
 }
+# TETHER-dea (V7): 액션 공간 분해 + 방향오차 인지 가중. Lotus_V7_dea.py 가
+# results/lotus_v7_dea_b<β>_<suite>_seed<seed> 로 쓴다. β 는 BETA_DEA 로 고른다
+# (환경변수 BETA_DEA 또는 --beta).
+BETA_DEA = float(os.environ.get("BETA_DEA", "3.0"))
+
+
+def dea_dir(suite: str, seed: int) -> str:
+    """β 표기가 두 가지다 — 런처는 BETA=3.0 을 그대로 폴더명에 넣어 "b3.0" 이
+    되는데, 파이썬 f"{3.0:g}" 는 "b3" 을 만든다. 실제로 있는 쪽을 쓴다.
+    (안 맞으면 리포트가 런을 영원히 못 찾고 조용히 "-" 로만 나온다.)"""
+    cands = [f"lotus_v7_dea_b{BETA_DEA:.1f}_{suite}_seed{seed}",
+             f"lotus_v7_dea_b{BETA_DEA:g}_{suite}_seed{seed}"]
+    for c in cands:
+        if (RES / c).is_dir():
+            return c
+    return cands[0]
+
+
 METHODS = (("seq-FT", lambda s, d: f"lotus_seq_{s}_seed{d}"),
            ("ER", lambda s, d: f"lotus_er_{s}_seed{d}"),
-           ("TETHER", lambda s, d: TETHER_DIR[(s, d)]))
+           ("TETHER", lambda s, d: TETHER_DIR[(s, d)]),
+           ("TETHER-dea", dea_dir))
 
 
 def lifelong(R, la) -> dict | None:
