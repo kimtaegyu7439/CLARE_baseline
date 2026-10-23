@@ -188,9 +188,12 @@ if [ -n "${DRY:-}" ]; then
     exit 0
 fi
 
+# 어느 리포트를 쓸지 바꿀 수 있다. 예: V7 β 애블레이션은
+#   REPORT_PY=V7_ablation_report.py ...
+REPORT_PY=${REPORT_PY:-CLARE_V6_report.py}
 report() {
-    flock "${HERE}/logs/.v6report.lock" \
-        python3 -u "${HERE}/CLARE_V6_report.py" > /dev/null 2>&1 || true
+    flock "${HERE}/logs/.$(basename "${REPORT_PY}" .py).lock" \
+        python3 -u "${HERE}/${REPORT_PY}" > /dev/null 2>&1 || true
 }
 
 # ── 1단계: 롤아웃만 ─────────────────────────────────────────────────────
