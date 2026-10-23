@@ -30,6 +30,13 @@ CLARE 쪽 CLARE_rollout_only.py 와 같은 역할이고, 다른 점은 LOTUS 의
 ★ 한 칸씩 저장하므로 중간에 죽어도 이미 잰 칸은 다시 안 돈다. 다시 실행하면
   빈 칸만 이어서 채운다 (--redo 로 전부 다시).
 
+★ sr_rollout.json 이 **durable 한 기록**이다. metrics.json 은 거기서 매번 다시
+  만든다. --skip_eval 로 돈 학습 런도 끝에 metrics.json 을 쓰는데(R 이 전부
+  null 이다), 그게 이 스크립트의 결과를 덮을 수 있다. 정상 순서라면 학습이
+  먼저 끝나고 롤아웃이 그 뒤에 계속 쓰므로 최종 상태는 맞다. 다만 이 스크립트가
+  먼저 죽은 채로 학습이 끝나면 metrics.json 만 null 로 남는다 — 그때는 이걸
+  (--watch 없이) 다시 한 번 돌리면 sr_rollout.json 에서 복원된다.
+
 ★ base 열에 대하여: 학습을 --skip_base_eval 로 돌렸으면 base 태스크(stage 0
   에서 joint 로 배운 것들)는 애초에 안 잰다. 여기서도 같은 기본값을 쓴다 —
   LIBERO-50 은 base 가 25 태스크라 스테이지마다 25 칸이 더 붙고 그게 전체
