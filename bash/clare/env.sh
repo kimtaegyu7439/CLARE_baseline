@@ -28,6 +28,25 @@ export TORCH_HOME=${TORCH_HOME:-${CLARE_MODEL_ROOT}/torch};
 export PRETRAIN_REPO=${PRETRAIN_REPO:-continuallearning/dit_flow_mt_libero_90_pretrain};
 export PRETRAIN_PATH=${PRETRAIN_PATH:-${CLARE_MODEL_ROOT}/$(basename "${PRETRAIN_REPO}")};
 
+
+# --- NVIDIA EGL (컨테이너에 그래픽 드라이버가 없을 때) -----------------------
+# 일부 GPU 컨테이너는 NVIDIA_DRIVER_CAPABILITIES 가 compute,utility 뿐이라
+# libEGL_nvidia.so 가 들어오지 않는다. 그러면 MuJoCo 오프스크린 렌더링이
+# Mesa llvmpipe(CPU 소프트웨어 래스터라이저)로 조용히 떨어져 롤아웃이
+# 7 배 가까이 느려진다 (실측 0.15ms -> 0.97ms per render, 1.0 -> 9.4 s/it).
+#
+# 커널 모듈과 **같은 버전**의 드라이버 .run 을 --extract-only 로 풀어
+# 유저스페이스 .so 만 ~/nvegl/lib 에 두면 루트 없이 쓸 수 있다.
+# dlopen 되는 libnvidia-gpucomp / libnvidia-nvvm / libnvidia-egl-gbm 까지
+# 같이 있어야 한다 — ldd 로는 안 잡혀서 빠뜨리기 쉽다.
+#
+# 그 디렉토리가 있을 때만 적용되므로, 드라이버가 제대로 들어있는 서버에는
+# 아무 영향이 없다.
+if [ -d "${HOME}/nvegl/lib" ] && [ -f "${HOME}/nvegl/10_nvidia.json" ]; then
+    export LD_LIBRARY_PATH="${HOME}/nvegl/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}";
+    export __EGL_VENDOR_LIBRARY_FILENAMES="${HOME}/nvegl/10_nvidia.json";
+fi
+
 # --- Training outputs --------------------------------------------------------
 # Checkpoints written during continual learning. Kept inside the repo by default.
 export CHECKPOINT_ROOT=${CHECKPOINT_ROOT:-./outputs};
