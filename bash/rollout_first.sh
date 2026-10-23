@@ -197,6 +197,15 @@ if [ "${PHASE}" = "all" ] || [ "${PHASE}" = "rollout" ]; then
         (
             export CUDA_VISIBLE_DEVICES="${GPU}" MUJOCO_EGL_DEVICE_ID="${GPU}" \
                    MUJOCO_GL=${MUJOCO_GL:-egl} HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
+            # ★ 스레드 수를 묶지 않으면 BLAS/OpenMP 가 **보이는 코어 수만큼**
+            #   스레드를 띄운다. 192 코어 서버에서 롤아웃 하나가 420 스레드를
+            #   달고 돌았고, 3 개가 경합해 스텝당 9.6 초까지 느려졌다
+            #   (32 코어 로컬은 19 스레드 / 1.26 초). CLARE_V6_queue.sh 는
+            #   원래 4 로 묶는데 이 경로에만 빠져 있었다.
+            export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4} \
+                   MKL_NUM_THREADS=${MKL_NUM_THREADS:-4} \
+                   OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-4} \
+                   NUMEXPR_NUM_THREADS=${NUMEXPR_NUM_THREADS:-4}
             # env.sh 가 export 한 값들(HF_LEROBOT_HOME, HF_HUB_CACHE, PRETRAIN_PATH)은
             # 상속되지만, 서브셸에서 한 번 더 확인해 둔다.
             [ -n "${HF_LEROBOT_HOME:-}" ] || source "${HERE}/bash/clare/env.sh" > /dev/null 2>&1
