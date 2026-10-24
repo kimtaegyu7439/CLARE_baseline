@@ -23,9 +23,22 @@ stage1 의 **첫 스텝**에서, 똑같은 (x_t, t, books, instructions) 에 대
   때문이다. Lotus_V7_dea.selftest 의 ② 항목이 이 배수를 합성 텐서에서 이미
   확인했고, 여기서는 실데이터에서 같은 배수가 나오는지를 본다.
 
-★ 난수: 두 구현은 태스크마다 (코드북 표본, eps0, eps1) 을 **같은 순서로**
-  뽑는다. 그래서 호출 직전에 같은 시드를 심으면 질의가 완전히 같아지고,
-  남는 차이는 손실 계산뿐이다. 시드를 안 심으면 표본이 달라 배수가 흔들린다.
+★★ 비교는 반드시 **eval 모드**에서 한다. 정책에 dropout 이 있고(config
+   dropout=0.1, 입력단 nn.Dropout(0.2)), train 모드면 forward 가 난수를
+   소비한다. 그런데 두 구현의 난수 소비 **순서가 다르다**:
+
+     LC 원본 : for j: [표본, eps0, eps1, teacher fwd, student fwd]
+     이식판   : for j: [표본, eps0, eps1, teacher fwd]  그 뒤  for j: [student fwd]
+
+   원본은 student forward 를 샘플링 사이에 끼워 돌리고, 이식판은 (dea 의
+   2-pass 때문에) 질의를 먼저 다 만들고 나중에 돌린다. 그래서 train 모드로
+   비교하면 같은 시드를 심어도 **서로 다른 질의**를 보게 되고, 배수가 7 에서
+   벗어난다 (실측 6.04 — 이식 버그처럼 보이지만 테스트 결함이었다).
+   eval 모드면 forward 가 난수를 쓰지 않아 두 구현의 질의가 완전히 같아진다.
+
+★ 난수: 태스크마다 (코드북 표본, eps0, eps1) 을 같은 순서로 뽑으므로, eval
+  모드에서 호출 직전에 같은 시드를 심으면 질의가 일치하고 남는 차이는 손실
+  계산뿐이다.
 """
 from __future__ import annotations
 
@@ -72,6 +85,12 @@ def main() -> None:
                         cls_dim, lam_lvl, device, args=args, diag=diag)
         state["done"] = True
         A = x_t.shape[-1]
+        # ★ dropout 을 끈다. 안 끄면 두 구현의 난수 소비 순서 차이로 질의가
+        #   달라져 배수가 흔들린다(위 docstring).
+        was_train = policy.training
+        policy.eval()
+        if teacher is not None:
+            teacher.eval()
         N = len(books)
         pos = (policy, teacher, books, instructions, x_t, t, st_shape, cls_dim,
                lam_lvl, device)
@@ -100,8 +119,12 @@ def main() -> None:
         print(f"  ③ dea β={known.beta} (mean, P=6)   {a_dea:.8f}   ← 실제 돌리는 설정")
         print()
         print(f"  ②/① = {ratio:.6f}   기대 A = {A}   상대오차 {err:.2e}")
+        if was_train:
+            policy.train()
         ok = err < 1e-4
         print(f"  판정: {'통과 — 이식이 원본과 항등' if ok else '★ 불일치 — 이식에 문제가 있다'}")
+        print(f"  (eval 모드 비교. dropout 켜진 채로 비교하면 난수 순서 차이로 "
+              f"배수가 6 근처로 나온다 — 테스트 결함이지 이식 문제가 아니다)")
         print(f"  참고: ③/① = {a_dea / a_mse if a_mse else float('nan'):.4f} "
               f"(dea 는 항등일 필요가 없다. 계수가 다른 다른 팔이다)")
         print("=" * 78)
