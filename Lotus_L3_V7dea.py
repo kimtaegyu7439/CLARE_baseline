@@ -1141,6 +1141,162 @@ def selftest() -> int:
 
 
 # ============================================================================
+#  롤아웃 전용 모드 — 학습과 다른 GPU 에서 SR 행렬만 채운다
+# ============================================================================
+
+def _stage_policy_path(run: Path, k: int) -> Path | None:
+    """스테이지 k 의 pretrained_model 경로. 없으면 None."""
+    base = run / "checkpoints" / f"stage{k}" / "checkpoints"
+    cand = base / "last" / "pretrained_model"
+    if (cand / "model.safetensors").exists():
+        return cand
+    if base.is_dir():      # last 심링크가 없으면 숫자 폴더 중 가장 큰 것
+        for d in sorted((x for x in base.iterdir() if x.name.isdigit()),
+                        key=lambda x: int(x.name), reverse=True):
+            if (d / "pretrained_model" / "model.safetensors").exists():
+                return d / "pretrained_model"
+    return None
+
+
+def _load_R(run: Path, n_stage: int, n_task: int):
+    """저장된 R 을 읽어 온다. 모양이 안 맞으면 새로 만든다."""
+    p = run / "sr_rollout.json"
+    if p.exists():
+        try:
+            R = json.loads(p.read_text())["R"]
+            if len(R) == n_stage + 1 and all(len(r) == n_task for r in R):
+                return R
+            logging.warning("[rollout] sr_rollout.json 모양 불일치 — 새로 만든다")
+        except Exception as e:
+            logging.warning(f"[rollout] sr_rollout.json 읽기 실패({e}) — 새로 만든다")
+    return [[None] * n_task for _ in range(n_stage + 1)]
+
+
+def _save_R(run: Path, R, spec, learned_at, instr, args, n_task):
+    """★ sr_rollout.json 이 durable 한 기록이다. report.txt / metrics.json 은
+    매번 거기서 다시 만든다 — 학습 쪽이 끼어들어 덮어도 복원된다."""
+    (run / "sr_rollout.json").write_text(
+        json.dumps({"R": R, "updated": time.strftime("%F %T")},
+                   indent=2, ensure_ascii=False), encoding="utf-8")
+    m = write_report(run / "report.txt", R, learned_at, instr, args, n_task, spec)
+    json.dump({"suite": args.suite, "R": R, "learned_at": learned_at,
+               "stage_tasks": spec["stage_tasks"],
+               "env_task": {str(k): v for k, v in spec["env_task"].items()},
+               "metrics": m,
+               "instructions": {str(k): v for k, v in instr.items()}},
+              (run / "metrics.json").open("w"), indent=2, ensure_ascii=False)
+    return m
+
+
+def rollout_only(a) -> None:
+    """학습이 남긴 스테이지 체크포인트로 SR 행렬을 채운다.
+
+    LIBERO-50 은 스테이지마다 최대 50 칸을 돌아 학습 루프 안의 롤아웃이 학습을
+    아주 오래 막는다. 학습은 --skip_eval 로 체크포인트만 남기고(GPU 하나),
+    이 모드가 다른 GPU 에서 평가를 돈다. 두 과정이 서로를 안 막는다.
+
+    ★ 칸을 채울 때마다 저장한다 — 중간에 죽어도 이미 잰 칸은 다시 안 돈다.
+    ★ base 열은 기본으로 건너뛴다 (LIBERO-50 은 스테이지마다 25 칸이 더 붙고
+      그게 전체 시간의 대부분이다). --base_eval 로 켠다.
+    """
+    run = Path(a.out)
+    if not run.is_dir():
+        raise SystemExit(f"런 폴더가 없다: {run}")
+    cfgf = run / "config.json"
+    if not cfgf.exists():
+        raise SystemExit(f"config.json 이 없다: {cfgf} (학습이 시작되긴 했나?)")
+    # ★ config.json 을 통째로 되살린다. write_report 가 ridge_rho, h_scale 등
+    #   학습 인자를 두루 읽어서, 골라 담으면 AttributeError 가 하나씩 튀어나온다.
+    cj = json.loads(cfgf.read_text())
+    args = argparse.Namespace(**cj)
+    args.device = a.device
+    args.skip_base_eval = not a.base_eval
+    # ★ --eval_episodes / --eval_seed 는 학습 모드와 공유하는 인자라 기본값이
+    #   늘 채워져 있다. 그래서 "값이 있으면 덮는다" 로 짜면 config.json 을 항상
+    #   무시하게 된다. 명령줄에 **직접 적었을 때만** 덮는다 — 학습 때와 다른
+    #   롤아웃 수/시드를 쓰면 같은 표 안에서 칸끼리 비교가 안 된다.
+    if "--eval_episodes" in sys.argv:
+        args.eval_episodes = args.eval_batch_size = a.eval_episodes
+    if "--eval_seed" in sys.argv:
+        args.eval_seed = a.eval_seed
+    for k, v in (("eval_episodes", 20), ("eval_batch_size", 20), ("eval_seed", 7),
+                 ("steps", 10000), ("num_workers", 6), ("batch_size", 32),
+                 ("n_stages", 0), ("seed", 42)):
+        if not hasattr(args, k):
+            setattr(args, k, v)
+
+    spec = suite_spec(args.suite)
+    if args.n_stages and args.n_stages < len(spec["stage_tasks"]):
+        spec["stage_tasks"] = spec["stage_tasks"][:args.n_stages]
+        keep = spec["n_base"] + sum(len(x) for x in spec["stage_tasks"])
+        spec["n_task"] = keep
+        spec["env_task"] = {t: v for t, v in spec["env_task"].items() if t < keep}
+        spec["instr"] = {t: v for t, v in spec["instr"].items() if t < keep}
+        spec["learned_at"] = spec["learned_at"][:keep]
+    n_task, n_stage = spec["n_task"], len(spec["stage_tasks"])
+    env_task, instr, learned_at = spec["env_task"], spec["instr"], spec["learned_at"]
+    want = (list(range(1, n_stage + 1)) if a.stages == "all"
+            else [int(x) for x in a.stages.split()])
+
+    logging.info(f"[rollout] {run.name}  suite={args.suite}  {n_stage} stage, "
+                 f"{n_task} task, 칸당 {args.eval_episodes} rollout, "
+                 f"eval seed {args.eval_seed}, "
+                 f"base 열 {'측정' if a.base_eval else '건너뜀'}")
+    get_safe_torch_device(args.device, log=True)
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cuda.matmul.allow_tf32 = True
+    root = spec["root"]
+
+    while True:
+        R = _load_R(run, n_stage, n_task)
+        did = missing = 0
+        for k in want:
+            pol = _stage_policy_path(run, k)
+            if pol is None:
+                logging.info(f"[rollout] stage{k} 체크포인트 아직 없음 — 건너뜀")
+                missing += 1
+                continue
+            n_seen = spec["stage_tasks"][k - 1][-1] + 1
+            todo = [t for t in range(n_seen)
+                    if (a.redo or R[k][t] is None)
+                    and (a.base_eval or learned_at[t] != 0)]
+            if not todo:
+                logging.info(f"[rollout] stage{k} 이미 다 채움")
+                continue
+            logging.info(f"[rollout] stage{k}: {len(todo)}칸  ({pol})")
+            cfg = build_eval_cfg(args, str(pol), env_task[todo[0]])
+            meta = LeRobotDatasetMetadata("local/lotus", root=str(root / f"stage{k}"))
+            policy = make_policy(cfg=cfg.policy, ds_meta=meta)
+            policy.to(args.device)
+            try:
+                for t in todo:
+                    t0 = time.perf_counter()
+                    R[k][t] = rollout_sr(policy, cfg, env_task[t], args)
+                    did += 1
+                    logging.info(f"[rollout] SR stage{k} task{t} ({env_task[t]}) = "
+                                 f"{R[k][t]}  ({time.perf_counter() - t0:.0f}s)")
+                    _save_R(run, R, spec, learned_at, instr, args, n_task)
+            finally:
+                del policy
+                torch.cuda.empty_cache()
+        filled = sum(1 for row in R for c in row if c is not None)
+        logging.info(f"[rollout] 이번 바퀴 {did}칸, 누적 {filled}칸 -> {run}/report.txt")
+        if not a.watch:
+            break
+        # ★ 종료 조건: 요청한 스테이지가 **전부 체크포인트를 갖고** 더 채울 칸이
+        #   없을 때. 이게 없으면 학습이 끝나도 영원히 돌며 GPU 를 붙잡는다.
+        if missing == 0 and did == 0:
+            logging.info("[rollout] 모든 스테이지 완료 — 종료")
+            break
+        if did == 0:
+            logging.info(f"[rollout] 남은 스테이지 {missing}개 — 대기 {a.poll}s")
+            time.sleep(a.poll)
+    m = _save_R(run, R, spec, learned_at, instr, args, n_task)
+    print((run / "report.txt").read_text())
+    logging.info(f"[rollout] 완료 — {m}")
+
+
+# ============================================================================
 #  메인
 # ============================================================================
 
@@ -1194,6 +1350,19 @@ def main() -> None:
                          "남으므로 다른 GPU 에서 따로 SR 을 채울 수 있다")
     ap.add_argument("--selftest", action="store_true",
                     help="모델 없이 수식만 검증하고 끝낸다")
+    # ── 롤아웃 전용 모드 ──────────────────────────────────────────────────
+    ap.add_argument("--rollout_only", action="store_true",
+                    help="학습하지 않고 --out 폴더의 스테이지 체크포인트로 SR 만 "
+                         "채운다. --skip_eval 학습과 짝으로 쓴다(다른 GPU)")
+    ap.add_argument("--watch", action="store_true",
+                    help="--rollout_only 에서 새 체크포인트를 기다리며 반복한다")
+    ap.add_argument("--poll", type=int, default=300, help="--watch 확인 간격(초)")
+    ap.add_argument("--stages", default="all", help='--rollout_only: "all" 또는 "1 2 3"')
+    ap.add_argument("--base_eval", action="store_true",
+                    help="--rollout_only: base 열도 잰다 (LIBERO-50 은 스테이지마다 "
+                         "25 칸이 더 붙는다)")
+    ap.add_argument("--redo", action="store_true",
+                    help="--rollout_only: 이미 채운 칸도 다시 잰다")
     ap.add_argument("--n_stages", type=int, default=0,
                     help="lifelong 스테이지 수를 앞에서 이만큼만 쓴다. 0 = 전부. "
                          "스모크에서 1 로 줄이는 용도이고 본 run 에서는 건드리지 않는다.")
@@ -1211,6 +1380,12 @@ def main() -> None:
     args = ap.parse_args()
     if args.selftest:
         raise SystemExit(selftest())
+    if args.rollout_only:
+        if not args.out:
+            raise SystemExit("--rollout_only 는 --out <런 폴더> 가 필요하다")
+        init_logging()
+        rollout_only(args)
+        return
     if args.suite is None:
         raise SystemExit("--suite 가 필요하다 (goal|object|50). 수식만 보려면 --selftest.")
 
@@ -1370,12 +1545,27 @@ def main() -> None:
             logging.info(f"[LOTUS] SR stage{stage} task{t} ({env_task[t]}) = {R[stage][t]}")
             write_report(out_dir / "report.txt", R, learned_at, instr, args, n_task, spec)
 
+    # ★ --skip_eval 이면 R 이 전부 None 이다. 그 상태로 report.txt / metrics.json 을
+    #   쓰면 같은 폴더를 따라가며 평가 중인 롤아웃 워커(--rollout_only)의 결과를
+    #   **덮어쓴다**. 학습이 롤아웃보다 먼저 끝나므로 반드시 덮는다.
+    #   그래서 학습 전용 run 은 metrics_train.json 에만 남긴다 — report.txt 와
+    #   metrics.json 의 주인은 롤아웃 워커다.
+    meta = {"suite": args.suite, "R": R, "learned_at": learned_at,
+            "stage_tasks": stage_tasks,
+            "env_task": {str(k): v for k, v in env_task.items()},
+            "instructions": {str(k): v for k, v in instr.items()}}
+    if args.skip_eval:
+        meta["metrics"] = None
+        meta["note"] = ("--skip_eval 학습 전용 run. SR 은 --rollout_only 워커가 "
+                        "metrics.json 에 쓴다.")
+        json.dump(meta, (out_dir / "metrics_train.json").open("w"),
+                  indent=2, ensure_ascii=False)
+        logging.info(f"[LOTUS] 학습 완료 (롤아웃 없음) -> {out_dir}  "
+                     f"평가는 --rollout_only 로 돌려라")
+        return
     m = write_report(out_dir / "report.txt", R, learned_at, instr, args, n_task, spec)
-    json.dump({"suite": args.suite, "R": R, "learned_at": learned_at,
-               "stage_tasks": stage_tasks,
-               "env_task": {str(k): v for k, v in env_task.items()},
-               "metrics": m, "instructions": {str(k): v for k, v in instr.items()}},
-              (out_dir / "metrics.json").open("w"), indent=2, ensure_ascii=False)
+    meta["metrics"] = m
+    json.dump(meta, (out_dir / "metrics.json").open("w"), indent=2, ensure_ascii=False)
     print((out_dir / "report.txt").read_text())
     logging.info(f"[LOTUS] 완료 -> {out_dir}")
 
