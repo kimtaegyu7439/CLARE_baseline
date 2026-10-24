@@ -19,8 +19,12 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; cd "${HERE}"
 
-SUITES_GPU=${SUITES_GPU:-"goal:0 object:1"}
-SPLIT=${SPLIT:-"50:2:3"}
+# ★ := 가 아니라 - 를 쓴다. ${X:-기본} 은 X="" (빈 문자열)도 기본값으로 바꿔
+#   버려서, SPLIT="" 로 "50 은 안 띄운다" 를 표현할 수 없다. 실제로 그 때문에
+#   object 만 추가하려고 SPLIT="" 를 넘겼더니 50 학습/롤아웃이 **두 번째로**
+#   떠서 같은 출력 폴더에 두 프로세스가 쓰는 사고가 났다.
+SUITES_GPU=${SUITES_GPU-"goal:0 object:1"}
+SPLIT=${SPLIT-"50:2:3"}
 SEEDS=${SEEDS:-"7 42 1000"}
 BETA=${BETA:-2.0}
 LIFELONG_K=${LIFELONG_K:-25}
@@ -126,9 +130,18 @@ rollout_loop() {
     } >> "${LOG}" 2>&1
 }
 
+# ★ 두 번째 방어선: 같은 스위트가 이미 돌고 있으면 띄우지 않는다.
+#   한 출력 폴더에 두 학습이 쓰면 체크포인트가 깨진다.
+already_running() {
+    pgrep -f "Lotus_L3_V7dea.py --suite $1 " >/dev/null 2>&1
+}
+
 echo "════ L3 ${FORM} β${BETA} lifelong K=${LIFELONG_K} — 시드 ${SEEDS} ════"
 for sg in ${SUITES_GPU}; do
     SUITE="${sg%%:*}"; GPU="${sg#*:}"
+    if already_running "${SUITE}"; then
+        echo "  ⏭ ${SUITE} 는 이미 돌고 있다 — 띄우지 않는다"; continue
+    fi
     setsid nohup bash -c "$(declare -f tag_of train_done train_loop); \
         SUITES_GPU='${SUITES_GPU}' SEEDS='${SEEDS}' BETA='${BETA}' \
         LIFELONG_K='${LIFELONG_K}' FORM='${FORM}' SPACE='${SPACE}' \
@@ -141,6 +154,9 @@ for sg in ${SUITES_GPU}; do
 done
 for sp in ${SPLIT}; do
     IFS=: read -r SUITE G1 G2 <<< "${sp}"
+    if already_running "${SUITE}"; then
+        echo "  ⏭ ${SUITE} 는 이미 돌고 있다 — 띄우지 않는다"; continue
+    fi
     setsid nohup bash -c "$(declare -f tag_of train_done train_loop); \
         SEEDS='${SEEDS}' BETA='${BETA}' LIFELONG_K='${LIFELONG_K}' FORM='${FORM}' \
         SPACE='${SPACE}' REDUCE='${REDUCE}' EPS_W='${EPS_W}' STEPS='${STEPS}' \
