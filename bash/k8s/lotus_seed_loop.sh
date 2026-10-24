@@ -46,8 +46,11 @@ python -c "import torch;print(f'    GPU {torch.cuda.device_count()}개  {torch.c
 for SEED in ${SEEDS}; do
     TAG="lotus_v7_${FORM}_b${BETA}_${SUITE}_seed${SEED}"
     OUT="results/${TAG}"
-    if [ -f "${OUT}/metrics.json" ]; then
-        ts "⏭ ${TAG} 이미 완주 (metrics.json 있음)"; continue
+    # ★ metrics.json 으로 판단하면 안 된다 — 롤아웃 전담 파드가 **첫 칸을 잴 때**
+    #   이미 그 파일을 만든다. 그걸 "완주"로 읽으면 학습이 안 끝난 시드를
+    #   건너뛴다. LC.main 이 맨 끝에만 찍는 "[LOTUS] 완료" 를 본다.
+    if grep -q '\[LOTUS\] 완료' "${OUT}/train.log" 2>/dev/null; then
+        ts "⏭ ${TAG} 학습 이미 완료"; continue
     fi
     mkdir -p "${OUT}"
     ARGS=(--suite "${SUITE}" --steps "${STEPS}"

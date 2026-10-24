@@ -69,13 +69,21 @@ METHODS = (("seq-FT", lambda s, d: f"lotus_seq_{s}_seed{d}"),
 
 
 def lifelong(R, la) -> dict | None:
-    """base(learned_at == 0)를 뺀 지표. 칸이 덜 찼으면 None."""
-    need = sum(1 for k in range(len(R)) for t in range(len(la)) if la[t] <= k)
-    have = sum(1 for k in range(len(R)) for t in range(len(R[k]))
-               if R[k][t] is not None)
+    """base(learned_at == 0)를 뺀 지표. 칸이 덜 찼으면 None.
+
+    ★ 완성도는 **지표에 실제로 쓰는 칸**(lifelong, la[t] > 0)만 센다. 전에는
+      base 칸까지 요구했는데, 정작 아래에서 base 는 제외하고 계산한다. 그래서
+      --skip_base_eval 로 돌린 런은 lifelong 칸이 다 찼어도 영원히 None 이
+      나왔다 (libero_50 은 스테이지마다 base 25 칸이 더 붙어 그게 전체 롤아웃
+      시간의 대부분이라, 빼고 돌리는 게 정상 운용이다).
+      base 칸을 채운 기존 런은 조건이 느슨해진 것이므로 수치가 바뀌지 않는다.
+    """
+    idx = [t for t in range(len(la)) if la[t] > 0]
+    need = sum(1 for k in range(len(R)) for t in idx if la[t] <= k)
+    have = sum(1 for k in range(len(R)) for t in idx
+               if t < len(R[k]) and R[k][t] is not None)
     if not (have >= need > 0):
         return None
-    idx = [t for t in range(len(la)) if la[t] > 0]
     fwt, nbt, auc = [], [], []
     for t in idx:
         col = [R[k][t] for k in range(la[t], len(R))
