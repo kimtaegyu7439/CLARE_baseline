@@ -16,7 +16,9 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; cd "${HERE}"
 SUITE=${SUITE:?SUITE (goal|object|50)}
 SEEDS=${SEEDS:-"7 42 1000"}
 BETA=${BETA:-3.0}
+LIFELONG_K=${LIFELONG_K:-25}
 FORM=${FORM:-dea}
+ENTRY=${ENTRY:-Lotus_L3_V7dea.py}
 N_EVAL=${N_EVAL:-0}            # 0 = 학습 config.json 값을 그대로
 POLL=${POLL:-300}
 BASE_EVAL=${BASE_EVAL:-0}
@@ -30,20 +32,21 @@ T=${OMP_THREADS:-8}
 export OMP_NUM_THREADS=$T MKL_NUM_THREADS=$T OPENBLAS_NUM_THREADS=$T NUMEXPR_NUM_THREADS=$T
 
 ts() { echo "[$(date '+%F %T')] $*"; }
-ts "════ 롤아웃 전담 — suite=${SUITE} β${BETA}, 시드 ${SEEDS} ════"
+ts "════ 롤아웃 전담 — suite=${SUITE} β${BETA} K${LIFELONG_K}, 시드 ${SEEDS} ════"
 python -c "import torch;print(f'    GPU {torch.cuda.device_count()}개  {torch.cuda.get_device_name(0)}')" 2>/dev/null
 
 for SEED in ${SEEDS}; do
-    RUN="results/lotus_v7_${FORM}_b${BETA}_${SUITE}_seed${SEED}"
+    RUN="results/lotus_l3_${FORM}_b${BETA}_k${LIFELONG_K}_${SUITE}_seed${SEED}"
     # 학습이 아직 config.json 조차 안 썼으면 생길 때까지 기다린다
     while [ ! -f "${RUN}/config.json" ]; do
         ts "⏳ ${RUN}/config.json 대기 (${POLL}s)"; sleep "${POLL}"
     done
-    ARGS=(--run "${RUN}" --watch --poll "${POLL}")
+    # 롤아웃은 L3 파일 안에 있다(--rollout_only) — 별도 파일이 필요 없다.
+    ARGS=(--rollout_only --out "${RUN}" --watch --poll "${POLL}")
     [ "${N_EVAL}" != "0" ] && ARGS+=(--eval_episodes "${N_EVAL}")
     [ "${BASE_EVAL}" = "1" ] && ARGS+=(--base_eval)
     ts "▶ ${RUN} 롤아웃 시작"
-    python -u Lotus_rollout_only.py "${ARGS[@]}" >> "${RUN}/rollout.log" 2>&1
+    python -u "${ENTRY}" "${ARGS[@]}" >> "${RUN}/rollout.log" 2>&1
     ts "◀ ${RUN} 롤아웃 exit=$?"
     tail -3 "${RUN}/rollout.log" 2>/dev/null | sed 's/^/     /'
 done

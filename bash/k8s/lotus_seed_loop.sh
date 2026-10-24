@@ -16,6 +16,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; cd "${HERE}"
 SUITE=${SUITE:?SUITE (goal|object|50)}
 SEEDS=${SEEDS:-"7 42 1000"}
 BETA=${BETA:-3.0}
+LIFELONG_K=${LIFELONG_K:-25}     # L3: lifelong 코드북 셀 수를 태스크당 고정
+ENTRY=${ENTRY:-Lotus_L3_V7dea.py}
 FORM=${FORM:-dea}
 SPACE=${SPACE:-act}
 REDUCE=${REDUCE:-mean}
@@ -40,20 +42,23 @@ T=${OMP_THREADS:-8}
 export OMP_NUM_THREADS=$T MKL_NUM_THREADS=$T OPENBLAS_NUM_THREADS=$T NUMEXPR_NUM_THREADS=$T
 
 ts() { echo "[$(date '+%F %T')] $*"; }
-ts "════ LOTUS V7 ${FORM} β${BETA} — suite=${SUITE}, 시드 ${SEEDS} ════"
+ts "════ LOTUS L3 ${FORM} β${BETA} lifelong K=${LIFELONG_K} — suite=${SUITE}, 시드 ${SEEDS} ════"
 python -c "import torch;print(f'    GPU {torch.cuda.device_count()}개  {torch.cuda.get_device_name(0)}')" 2>/dev/null
 
 for SEED in ${SEEDS}; do
-    TAG="lotus_v7_${FORM}_b${BETA}_${SUITE}_seed${SEED}"
+    # ★ 태그에 K 를 넣는다 — K=20 으로 돌린 기존 lotus_v7_dea_* 과 섞이면 안 된다.
+    TAG="lotus_l3_${FORM}_b${BETA}_k${LIFELONG_K}_${SUITE}_seed${SEED}"
     OUT="results/${TAG}"
     # ★ metrics.json 으로 판단하면 안 된다 — 롤아웃 전담 파드가 **첫 칸을 잴 때**
     #   이미 그 파일을 만든다. 그걸 "완주"로 읽으면 학습이 안 끝난 시드를
-    #   건너뛴다. LC.main 이 맨 끝에만 찍는 "[LOTUS] 완료" 를 본다.
-    if grep -q '\[LOTUS\] 완료' "${OUT}/train.log" 2>/dev/null; then
+    #   건너뛴다. skip_eval 런은 metrics_train.json, 보통 런은 "[LOTUS] 완료".
+    if [ -f "${OUT}/metrics_train.json" ] \
+       || grep -q '\[LOTUS\] 완료' "${OUT}/train.log" 2>/dev/null; then
         ts "⏭ ${TAG} 학습 이미 완료"; continue
     fi
     mkdir -p "${OUT}"
     ARGS=(--suite "${SUITE}" --steps "${STEPS}"
+          --lifelong_k "${LIFELONG_K}"
           --anchor_form "${FORM}" --beta "${BETA}" --eps_w "${EPS_W}"
           --dir_space "${SPACE}" --anchor_reduce "${REDUCE}"
           --sampler_mode hard_linear
@@ -66,7 +71,7 @@ for SEED in ${SEEDS}; do
     [ -n "${EXTRA}" ] && ARGS+=(${EXTRA})
 
     ts "▶ ${TAG}  (로그 ${OUT}/train.log)"
-    python -u Lotus_V7_dea.py "${ARGS[@]}" >> "${OUT}/train.log" 2>&1
+    python -u "${ENTRY}" "${ARGS[@]}" >> "${OUT}/train.log" 2>&1
     rc=$?
     ts "◀ ${TAG} exit=${rc}"
     if [ "${rc}" -ne 0 ]; then
@@ -78,7 +83,9 @@ done
 
 ts "════ ${SUITE} 전부 종료 ════"
 for SEED in ${SEEDS}; do
-    TAG="lotus_v7_${FORM}_b${BETA}_${SUITE}_seed${SEED}"
-    printf '  %-48s %s\n' "${TAG}" \
-        "$([ -f "results/${TAG}/metrics.json" ] && echo 완주 || echo 미완)"
+    TAG="lotus_l3_${FORM}_b${BETA}_k${LIFELONG_K}_${SUITE}_seed${SEED}"
+    printf '  %-52s %s\n' "${TAG}" \
+        "$([ -f "results/${TAG}/metrics_train.json" ] \
+            || grep -q '\[LOTUS\] 완료' "results/${TAG}/train.log" 2>/dev/null \
+            && echo 학습완료 || echo 미완)"
 done

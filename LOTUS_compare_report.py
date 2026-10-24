@@ -62,10 +62,25 @@ def dea_dir(suite: str, seed: int) -> str:
     return cands[0]
 
 
+# L3 = lifelong 코드북 셀 수를 태스크당 고정(기본 25). β 와 K 를 태그에 적는다.
+BETA_L3 = float(os.environ.get("BETA_L3", "2.0"))
+K_L3 = int(os.environ.get("K_L3", "25"))
+
+
+def l3_dir(suite: str, seed: int) -> str:
+    cands = [f"lotus_l3_dea_b{BETA_L3:.1f}_k{K_L3}_{suite}_seed{seed}",
+             f"lotus_l3_dea_b{BETA_L3:g}_k{K_L3}_{suite}_seed{seed}"]
+    for c in cands:
+        if (RES / c).is_dir():
+            return c
+    return cands[0]
+
+
 METHODS = (("seq-FT", lambda s, d: f"lotus_seq_{s}_seed{d}"),
            ("ER", lambda s, d: f"lotus_er_{s}_seed{d}"),
            ("TETHER", lambda s, d: TETHER_DIR[(s, d)]),
-           ("TETHER-dea", dea_dir))
+           ("TETHER-dea", dea_dir),
+           (f"L3-dea b{BETA_L3:g} K{K_L3}", l3_dir))
 
 
 def lifelong(R, la) -> dict | None:
