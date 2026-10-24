@@ -91,6 +91,17 @@ def main() -> None:
         policy.eval()
         if teacher is not None:
             teacher.eval()
+        # ★★ stage1 step0 에서는 teacher = snapshot(policy) 라 두 속도장이
+        #    **완전히 같다**. 그대로 비교하면 잔차가 0 이고 손실이 1e-8 수준
+        #    수치 노이즈가 되어 비율이 무의미해진다(실측 23.6).
+        #    그래서 student 를 조금 흔들어 잔차를 실제 크기로 만든다. eval
+        #    모드이므로 forward 는 여전히 난수를 쓰지 않아 질의는 일치한다.
+        g = torch.Generator(device="cpu").manual_seed(777)
+        with torch.no_grad():
+            for prm in policy.parameters():
+                if prm.dtype.is_floating_point:
+                    noise = torch.randn(prm.shape, generator=g, dtype=torch.float32)
+                    prm.add_(noise.to(prm.device, prm.dtype) * (0.02 * prm.detach().float().std().clamp_min(1e-6)).to(prm.dtype))
         N = len(books)
         pos = (policy, teacher, books, instructions, x_t, t, st_shape, cls_dim,
                lam_lvl, device)
@@ -108,6 +119,9 @@ def main() -> None:
                                    pose_dims=0))
         a_dea = _run_one(de, pos, dict(args=_Opt(sampler_mode="hard_linear"), diag=None))
 
+        if a_mse < 1e-6:
+            print(f"★ 원본 손실이 {a_mse:.2e} 로 너무 작다 — 비교가 무의미하다. "
+                  f"student 를 더 흔들어야 한다.")
         ratio = a_sq / a_mse if a_mse else float("nan")
         err = abs(ratio - A) / A
         print()
