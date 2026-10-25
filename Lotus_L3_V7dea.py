@@ -1345,6 +1345,17 @@ def main() -> None:
                          "앵커는 과거에 대한 **합**이라 sum 이 그쪽과 같은 스케일이다")
     ap.add_argument("--pose_dims", type=int, default=0,
                     help="0 이면 POSE_DIMS(6, gripper 제외). 7 로 두면 전 축")
+    ap.add_argument("--anchor_scope", choices=["lifelong", "all"], default="lifelong",
+                    help="앵커가 보존할 '과거 태스크' 의 범위. "
+                         "lifelong = stage 에서 배운 태스크만 (기본). "
+                         "all = base 태스크까지 포함(예전 거동). "
+                         "★ base 를 넣으면 앵커 예산의 대부분이 **점수에 안 들어가는** "
+                         "태스크로 간다 — 지표는 --skip_base_eval 로 base 를 "
+                         "애초에 재지 않는다. goal stage1 은 과거 6 개가 전부 base 라 "
+                         "예산 100%가 낭비되고, LIBERO-50 stage5 도 45 중 25(56%)가 "
+                         "base 다. 게다가 dea 는 Σw=1 이라 β 가 총 예산이므로, base 가 "
+                         "끼면 lifelong 태스크당 몫이 그만큼 줄어든다. "
+                         "★ lifelong 이면 stage1 에는 과거가 없어 앵커가 0 이다(seq-FT 와 같다).")
     ap.add_argument("--skip_eval", action="store_true",
                     help="롤아웃을 전부 건너뛰고 학습만 한다. 스테이지 체크포인트는 "
                          "남으므로 다른 GPU 에서 따로 SR 을 채울 수 있다")
@@ -1435,6 +1446,8 @@ def main() -> None:
                              f"({len(miss)}개, 예: {miss[0]!r})")
     logging.info(f"[LOTUS] suite={args.suite}  base {n_base} task  "
                  f"{n_stages} stage x {len(stage_tasks[0])} task  총 {n_task} task")
+    logging.info(f"[L3] anchor_scope={args.anchor_scope} "
+                 f"(과거 = {'lifelong 만' if args.anchor_scope == 'lifelong' else 'base + lifelong'})")
     logging.info(f"[L3] lifelong K={args.lifelong_k or '규칙'} (태스크당)  "
                  f"base K=k_per_demo x demo  |  앵커 {args.anchor_form} β={args.beta} "
                  f"space={args.dir_space} reduce={args.anchor_reduce} "
@@ -1450,10 +1463,18 @@ def main() -> None:
 
     t0 = time.perf_counter()
     # base 는 기존 규칙(K = k_per_demo x demo = 100). k_fixed 를 넘기지 않는다.
-    books = make_books(policy, root / "base", device, args,
-                       task_ids=list(range(n_base)), n_demos=spec["base_demos"],
-                       k_fixed=None)
-    logging.info(f"[LOTUS] base 코드북 {len(books)}개 ({time.perf_counter()-t0:.0f}s)")
+    # ★ anchor_scope=lifelong 이면 아예 만들지 않는다 — 앵커에 안 쓰이는데
+    #   LIBERO-50 은 25 태스크 빌드에 32 분이 걸린다. books 는 anchor_loss 와
+    #   로그에만 쓰이므로 비워 두어도 다른 경로가 깨지지 않는다(확인함).
+    if args.anchor_scope == "all":
+        books = make_books(policy, root / "base", device, args,
+                           task_ids=list(range(n_base)), n_demos=spec["base_demos"],
+                           k_fixed=None)
+        logging.info(f"[LOTUS] base 코드북 {len(books)}개 ({time.perf_counter()-t0:.0f}s)")
+    else:
+        books = {}
+        logging.info(f"[LOTUS] base 코드북 **건너뜀** (--anchor_scope lifelong) — "
+                     f"base {n_base}개는 과거로 안 센다. stage1 은 앵커 없이 학습된다")
     teacher = snapshot(policy)
 
     if args.skip_eval or getattr(args, "skip_base_eval", False):
