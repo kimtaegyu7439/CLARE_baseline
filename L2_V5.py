@@ -206,6 +206,7 @@ def run_clare(opt) -> None:
                 "★ anchor_wnorm 은 쓰이지 않는다 — speed_weights() 를 호출하지 않고 "
                 "계수를 직접 만든다. 배치 가중 제거가 플래그가 아니라 코드 경로로 보장된다.",
     }, (out_dir / "v5_config.json").open("w"), indent=2, ensure_ascii=False)
+    print(f"[V5] {anchor.describe()}", flush=True)
     logging.info(f"[V5] {anchor.describe()}")
     B1._train_loop(args, anchor)
 
@@ -289,8 +290,12 @@ def run_lotus(opt) -> None:
         return ns
 
     argparse.ArgumentParser.parse_args = _patched
-    logging.info(f"[V5] LOTUS — 방향계수 1/(r_T²+c) c={opt.anchor_c} "
-                 f"space={opt.dir_space} reduce={opt.anchor_reduce}")
+    # ★ print 로 찍는다. 드라이버가 init_logging() 을 부르기 **전**이라
+    #   logging.info 는 핸들러가 없어 조용히 삼켜진다 (실측: train.log 에 안 남음).
+    #   설정 자체는 드라이버가 config.json 에 덤프하므로 기록은 그쪽이 정본이다.
+    print(f"[V5] LOTUS — 방향계수 1/(r_T²+c)  c={opt.anchor_c}  "
+          f"space={opt.dir_space}  reduce={opt.anchor_reduce}  "
+          f"λ_lvl={opt.lambda_level}  lifelong_K={opt.lifelong_k}", flush=True)
     try:
         LC.main()
     finally:
