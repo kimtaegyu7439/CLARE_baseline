@@ -17,6 +17,14 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; cd "${HERE}"
 
+# ★ 떼어낸 서브셸에는 conda 가 없다. 여기서 직접 켠다 — 안 켜면
+#   "ModuleNotFoundError: No module named 'torch'" 로 즉시 죽는다.
+if [ -z "${CONDA_PREFIX:-}" ] || [ "$(basename "${CONDA_PREFIX:-}")" != "clare" ]; then
+    source /home/sa090180/miniconda3/etc/profile.d/conda.sh
+    conda activate clare
+fi
+source "${HERE}/bash/clare/env.sh"
+
 JOBS=${JOBS-"goal:0.1:0 object:0.1:1 goal:0.01:2 object:0.01:3"}
 SEEDS=${SEEDS:-"7"}
 SPACE=${SPACE:-act}
@@ -78,7 +86,8 @@ run_one() {
                 --eval_episodes "${N_EVAL}" --eval_batch_size "${N_EVAL}" \
                 --num_workers "${NW}" --out "results/${TAG}" \
                 >> "results/${TAG}/train.log" 2>&1
-            echo "[$(date '+%F %T')] ◀ ${TAG} exit=$?"
+            rc=$?    # ★ 먼저 잡는다. echo 안의 $(date) 가 $? 를 0 으로 덮어쓴다
+            echo "[$(date '+%F %T')] ◀ ${TAG} exit=${rc}"
         done
         echo "[$(date '+%F %T')] ════ ${SUITE} c=${C} 종료 ════"
     } >> "${LOG}" 2>&1

@@ -19,6 +19,14 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; cd "${HERE}"
 
+# ★ 떼어낸 서브셸에는 conda 가 없다. 여기서 직접 켠다 — 안 켜면
+#   "ModuleNotFoundError: No module named 'torch'" 로 즉시 죽는다.
+if [ -z "${CONDA_PREFIX:-}" ] || [ "$(basename "${CONDA_PREFIX:-}")" != "clare" ]; then
+    source /home/sa090180/miniconda3/etc/profile.d/conda.sh
+    conda activate clare
+fi
+source "${HERE}/bash/clare/env.sh"
+
 # ★ := 가 아니라 - 를 쓴다. ${X:-기본} 은 X="" (빈 문자열)도 기본값으로 바꿔
 #   버려서, SPLIT="" 로 "50 은 안 띄운다" 를 표현할 수 없다. 실제로 그 때문에
 #   object 만 추가하려고 SPLIT="" 를 넘겼더니 50 학습/롤아웃이 **두 번째로**
@@ -99,7 +107,8 @@ train_loop() {
                 --eval_episodes "${N_EVAL}" --eval_batch_size "${N_EVAL}" \
                 --num_workers "${NW}" --out "results/${TAG}" ${SKIP} \
                 >> "results/${TAG}/train.log" 2>&1
-            echo "[$(date '+%F %T')] ◀ ${TAG} exit=$?"
+            rc=$?    # ★ 먼저 잡는다. echo 안의 $(date) 가 $? 를 0 으로 덮어쓴다
+            echo "[$(date '+%F %T')] ◀ ${TAG} exit=${rc}"
         done
         echo "[$(date '+%F %T')] ════ ${SUITE} 학습 종료 ════"
     } >> "${LOG}" 2>&1
@@ -124,7 +133,8 @@ rollout_loop() {
             python -u "${ENTRY}" --rollout_only --out "results/${TAG}" \
                 --watch --poll "${POLL}" \
                 >> "results/${TAG}/rollout.log" 2>&1
-            echo "[$(date '+%F %T')] ◀ ${TAG} 롤아웃 exit=$?"
+            rc=$?
+            echo "[$(date '+%F %T')] ◀ ${TAG} 롤아웃 exit=${rc}"
         done
         echo "[$(date '+%F %T')] ════ ${SUITE} 롤아웃 종료 ════"
     } >> "${LOG}" 2>&1
