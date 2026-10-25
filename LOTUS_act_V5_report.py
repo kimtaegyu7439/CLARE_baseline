@@ -37,15 +37,17 @@ RES = REPO / "results"
 OUT = RES / "LOTUS_act_V5_SR.txt"
 SUITES = ("goal", "object", "50")
 SPACE = os.environ.get("SPACE", "act")
+# LL = lifelong(base 를 과거로 안 센다), ALL = base 포함(예전, 무효)
+SCOPE_TAG = os.environ.get("SCOPE_TAG", "LL")
 
 
 def run_dir(c: float, k: int, suite: str, seed: int) -> Path:
     """c 표기가 여러 가지다 (런처는 "0.1"/"0.01", 파이썬 :g 도 같다). 있는 쪽을 쓴다."""
     for cs in (f"{c:g}", f"{c}", f"{c:.2f}"):
-        d = RES / f"lotus_v5{SPACE}_c{cs}_k{k}_{suite}_seed{seed}"
+        d = RES / f"lotus_v5{SPACE}_c{cs}_k{k}_scope{SCOPE_TAG}_{suite}_seed{seed}"
         if d.is_dir():
             return d
-    return RES / f"lotus_v5{SPACE}_c{c:g}_k{k}_{suite}_seed{seed}"
+    return RES / f"lotus_v5{SPACE}_c{c:g}_k{k}_scope{SCOPE_TAG}_{suite}_seed{seed}"
 
 
 def read_R(d: Path):
@@ -164,6 +166,8 @@ def main() -> None:
     add("      2·r_S·r_T 는 빠른 구간일수록 커서 느린 구간(정밀 조작)의 방향을")
     add("      사실상 감독하지 못한다 — 그 의존을 뒤집는다.")
     add("      배치평균 정규화 없음 · w_clip 없음(coef ≤ 1/c 로 유계) · 1-pass")
+    add("")
+    add(f"      anchor_scope={'lifelong (base 는 과거로 안 센다)' if SCOPE_TAG == 'LL' else 'all (base 포함 — 무효)'}")
     add("")
     add(f"설정  L2_V5.py --setting lotus --dir_space {SPACE}   c = "
         + ", ".join(f"{c:g}" for c in cs))

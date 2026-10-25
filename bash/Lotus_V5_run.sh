@@ -28,6 +28,8 @@ source "${HERE}/bash/clare/env.sh"
 JOBS=${JOBS-"goal:0.1:0 object:0.1:1 goal:0.01:2 object:0.01:3"}
 SEEDS=${SEEDS:-"7"}
 SPACE=${SPACE:-act}
+SCOPE=${SCOPE:-lifelong}   # 앵커가 보존할 과거의 범위 (base 는 세지 않는다)
+SCOPE_TAG=$([ "${SCOPE}" = "all" ] && echo ALL || echo LL)
 LIFELONG_K=${LIFELONG_K:-25}
 LAM=${LAM:-1.0}
 REDUCE=${REDUCE:-mean}
@@ -39,7 +41,8 @@ OMP_THREADS=${OMP_THREADS:-6}
 ENTRY=${ENTRY:-L2_V5.py}
 
 mkdir -p logs results
-tag_of() { echo "lotus_v5${SPACE}_c${2}_k${LIFELONG_K}_${1}_seed${3}"; }
+# ★ 태그에 scope 를 넣는다 — base 를 과거로 세던 예전 런(INVALID.md)과 섞이면 안 된다.
+tag_of() { echo "lotus_v5${SPACE}_c${2}_k${LIFELONG_K}_scope${SCOPE_TAG}_${1}_seed${3}"; }
 
 # 학습이 끝났나 — 보통 런은 LC.main 이 맨 끝에만 찍는 "[LOTUS] 완료".
 # metrics.json 으로 보면 안 된다(롤아웃 워커가 첫 칸에서 만든다).
@@ -81,6 +84,7 @@ run_one() {
             python -u "${ENTRY}" --setting lotus \
                 --anchor_c "${C}" --dir_space "${SPACE}" --anchor_reduce "${REDUCE}" \
                 --lambda_level "${LAM}" --lifelong_k "${LIFELONG_K}" \
+                --anchor_scope "${SCOPE}" \
                 --suite "${SUITE}" --steps "${STEPS}" --sampler_mode hard_linear \
                 --skip_base_eval --seed "${SEED}" --eval_seed "${EVAL_SEED}" \
                 --eval_episodes "${N_EVAL}" --eval_batch_size "${N_EVAL}" \
@@ -93,7 +97,7 @@ run_one() {
     } >> "${LOG}" 2>&1
 }
 
-echo "════ L2_V5 (${SPACE}) LOTUS — λ_lvl=${LAM}, lifelong K=${LIFELONG_K}, 시드 ${SEEDS} ════"
+echo "════ L2_V5 (${SPACE}) LOTUS — λ_lvl=${LAM}, K=${LIFELONG_K}, scope=${SCOPE}, 시드 ${SEEDS} ════"
 for j in ${JOBS}; do
     IFS=: read -r SUITE C GPU <<< "${j}"
     t=$(tag_of "${SUITE}" "${C}" "$(echo ${SEEDS} | awk '{print $1}')")
@@ -101,7 +105,8 @@ for j in ${JOBS}; do
         echo "  ⏭ ${t} 이미 돌고 있다"; continue
     fi
     setsid nohup bash -c "$(declare -f tag_of train_done run_one); \
-        SEEDS='${SEEDS}' SPACE='${SPACE}' LIFELONG_K='${LIFELONG_K}' LAM='${LAM}' \
+        SEEDS='${SEEDS}' SPACE='${SPACE}' SCOPE='${SCOPE}' SCOPE_TAG='${SCOPE_TAG}' \
+        LIFELONG_K='${LIFELONG_K}' LAM='${LAM}' \
         REDUCE='${REDUCE}' STEPS='${STEPS}' N_EVAL='${N_EVAL}' \
         EVAL_SEED='${EVAL_SEED}' NW='${NW}' OMP_THREADS='${OMP_THREADS}' \
         ENTRY='${ENTRY}'; cd '${HERE}'; run_one '${SUITE}' '${C}' '${GPU}'" \
