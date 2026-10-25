@@ -50,6 +50,59 @@ def run_dir(c: float, k: int, suite: str, seed: int) -> Path:
     return RES / f"lotus_v5{SPACE}_c{c:g}_k{k}_scope{SCOPE_TAG}_{suite}_seed{seed}"
 
 
+def read_report_txt(d: Path):
+    """진행 중인 런의 SR 을 드라이버가 쓴 report.txt 에서 읽는다.
+
+    ★ 왜 필요한가: 드라이버는 metrics.json 을 **런이 끝날 때 한 번만** 쓴다.
+      그런데 롤아웃은 스테이지마다 일어나고 그 결과가 report.txt 에는 바로
+      반영된다. metrics.json 만 보면 하루 넘게 "-" 만 보인다.
+      (--skip_eval + 롤아웃 워커로 돌리는 런은 sr_rollout.json 이 있어서
+       이 경로를 타지 않는다.)
+
+    learned_at 은 SR 행렬에서 되살린다 — 태스크 t 가 처음 등장한 스테이지가
+    그 태스크를 배운 스테이지다. base 태스크는 --skip_base_eval 로 아예 재지
+    않으므로 행렬에 없고, 그래서 자동으로 제외된다(lifelong 만 남는다).
+    """
+    p = d / "report.txt"
+    if not p.exists():
+        return None, None
+    txt = p.read_text(errors="ignore")
+    i = txt.find("SR matrix")
+    if i < 0:
+        return None, None
+    lines = txt[i:].splitlines()
+    hdr = next((l for l in lines if l.strip().startswith("stage")), None)
+    if hdr is None:
+        return None, None
+    # 열 머리 "t0 t1 ..." 의 문자 위치를 잡아 고정폭으로 자른다
+    cols = [(m.start(), int(m.group(1))) for m in re.finditer(r"t(\d+)", hdr)]
+    if not cols:
+        return None, None
+    nt = max(t for _, t in cols) + 1
+    rows = {}
+    for l in lines[lines.index(hdr) + 1:]:
+        m = re.match(r"^(\d+)\s", l)
+        if not m:
+            if l.startswith("---") and rows:
+                break
+            continue
+        k = int(m.group(1))
+        row = [None] * nt
+        for pos, t in cols:
+            cell = l[pos - 1:pos + 5].strip() if pos else l[:6].strip()
+            if cell and re.fullmatch(r"-?\d+(\.\d+)?", cell):
+                row[t] = float(cell)
+        rows[k] = row
+    if not rows:
+        return None, None
+    R = [rows.get(k, [None] * nt) for k in range(max(rows) + 1)]
+    la = [0] * nt
+    for t in range(nt):
+        ks = [k for k in range(len(R)) if R[k][t] is not None]
+        la[t] = min(ks) if ks else 0
+    return R, la
+
+
 def read_R(d: Path):
     """(R, learned_at, 출처) — 없으면 (None, None, None)."""
     p = d / "sr_rollout.json"
@@ -76,6 +129,9 @@ def read_R(d: Path):
                     return j["R"], j.get("learned_at"), f
             except Exception:
                 pass
+    R, la = read_report_txt(d)
+    if R:
+        return R, la, "report.txt (진행 중)"
     return None, None, None
 
 
