@@ -35,6 +35,7 @@ SUITES_GPU=${SUITES_GPU-"goal:0 object:1"}
 SPLIT=${SPLIT-"50:2:3"}
 SEEDS=${SEEDS:-"7 42 1000"}
 BETA=${BETA:-2.0}
+SCOPE=${SCOPE:-lifelong}   # 앵커가 보존할 과거의 범위
 LIFELONG_K=${LIFELONG_K:-25}
 FORM=${FORM:-dea}
 SPACE=${SPACE:-act}
@@ -49,7 +50,11 @@ POLL=${POLL:-300}
 ENTRY=${ENTRY:-Lotus_L3_V7dea.py}
 
 mkdir -p logs results
-tag_of() { echo "lotus_l3_${FORM}_b${BETA}_k${LIFELONG_K}_${1}_seed${2}"; }
+# ★ 태그에 scope 를 넣는다 — base 를 과거로 세던 예전 런(INVALID.md 가 들어
+#   있는 폴더)과 섞이면 안 된다.
+# scope 를 태그에 짧게 적는다: lifelong -> LL, all -> ALL
+scope_tag() { [ "${SCOPE}" = "all" ] && echo ALL || echo LL; }
+tag_of() { echo "lotus_l3_${FORM}_b${BETA}_k${LIFELONG_K}_scope$(scope_tag)_${1}_seed${2}"; }
 
 # 학습이 끝났나 — skip_eval 런은 metrics_train.json, 보통 런은 metrics.json.
 # ★ metrics.json 만 보면 안 된다: 롤아웃 워커가 **첫 칸을 잴 때** 이미 그 파일을
@@ -99,7 +104,7 @@ train_loop() {
             OMP_NUM_THREADS="${OMP_THREADS}" MKL_NUM_THREADS="${OMP_THREADS}" \
             OPENBLAS_NUM_THREADS="${OMP_THREADS}" NUMEXPR_NUM_THREADS="${OMP_THREADS}" \
             python -u "${ENTRY}" --suite "${SUITE}" --steps "${STEPS}" \
-                --lifelong_k "${LIFELONG_K}" \
+                --lifelong_k "${LIFELONG_K}" --anchor_scope "${SCOPE}" \
                 --anchor_form "${FORM}" --beta "${BETA}" --eps_w "${EPS_W}" \
                 --dir_space "${SPACE}" --anchor_reduce "${REDUCE}" \
                 --sampler_mode hard_linear --skip_base_eval \
@@ -146,14 +151,14 @@ already_running() {
     pgrep -f "Lotus_L3_V7dea.py --suite $1 " >/dev/null 2>&1
 }
 
-echo "════ L3 ${FORM} β${BETA} lifelong K=${LIFELONG_K} — 시드 ${SEEDS} ════"
+echo "════ L3 ${FORM} β${BETA} K=${LIFELONG_K} scope=${SCOPE} — 시드 ${SEEDS} ════"
 for sg in ${SUITES_GPU}; do
     SUITE="${sg%%:*}"; GPU="${sg#*:}"
     if already_running "${SUITE}"; then
         echo "  ⏭ ${SUITE} 는 이미 돌고 있다 — 띄우지 않는다"; continue
     fi
-    setsid nohup bash -c "$(declare -f tag_of train_done train_loop); \
-        SUITES_GPU='${SUITES_GPU}' SEEDS='${SEEDS}' BETA='${BETA}' \
+    setsid nohup bash -c "$(declare -f scope_tag tag_of train_done train_loop); \
+        SUITES_GPU='${SUITES_GPU}' SEEDS='${SEEDS}' BETA='${BETA}' SCOPE='${SCOPE}' \
         LIFELONG_K='${LIFELONG_K}' FORM='${FORM}' SPACE='${SPACE}' \
         REDUCE='${REDUCE}' EPS_W='${EPS_W}' STEPS='${STEPS}' N_EVAL='${N_EVAL}' \
         EVAL_SEED='${EVAL_SEED}' NW='${NW}' OMP_THREADS='${OMP_THREADS}' \
@@ -167,16 +172,16 @@ for sp in ${SPLIT}; do
     if already_running "${SUITE}"; then
         echo "  ⏭ ${SUITE} 는 이미 돌고 있다 — 띄우지 않는다"; continue
     fi
-    setsid nohup bash -c "$(declare -f tag_of train_done train_loop); \
-        SEEDS='${SEEDS}' BETA='${BETA}' LIFELONG_K='${LIFELONG_K}' FORM='${FORM}' \
+    setsid nohup bash -c "$(declare -f scope_tag tag_of train_done train_loop); \
+        SEEDS='${SEEDS}' BETA='${BETA}' SCOPE='${SCOPE}' LIFELONG_K='${LIFELONG_K}' FORM='${FORM}' \
         SPACE='${SPACE}' REDUCE='${REDUCE}' EPS_W='${EPS_W}' STEPS='${STEPS}' \
         N_EVAL='${N_EVAL}' EVAL_SEED='${EVAL_SEED}' NW='${NW}' \
         OMP_THREADS='${OMP_THREADS}' ENTRY='${ENTRY}'; cd '${HERE}'; \
         train_loop '${SUITE}' '${G1}' '--skip_eval'" > /dev/null 2>&1 &
     echo "  ▶ GPU ${G1}  ${SUITE} 학습만      로그 logs/l3_${SUITE}_train.log"
     sleep 3
-    setsid nohup bash -c "$(declare -f tag_of rollout_loop); \
-        SEEDS='${SEEDS}' BETA='${BETA}' LIFELONG_K='${LIFELONG_K}' FORM='${FORM}' \
+    setsid nohup bash -c "$(declare -f scope_tag tag_of rollout_loop); \
+        SEEDS='${SEEDS}' BETA='${BETA}' SCOPE='${SCOPE}' LIFELONG_K='${LIFELONG_K}' FORM='${FORM}' \
         POLL='${POLL}' OMP_THREADS='${OMP_THREADS}' ENTRY='${ENTRY}'; \
         cd '${HERE}'; rollout_loop '${SUITE}' '${G2}'" > /dev/null 2>&1 &
     echo "  ▶ GPU ${G2}  ${SUITE} 롤아웃 전담  로그 logs/l3_${SUITE}_rollout.log"

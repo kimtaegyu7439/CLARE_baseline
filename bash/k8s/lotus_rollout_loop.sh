@@ -17,6 +17,9 @@ SUITE=${SUITE:?SUITE (goal|object|50)}
 SEEDS=${SEEDS:-"7 42 1000"}
 BETA=${BETA:-3.0}
 LIFELONG_K=${LIFELONG_K:-25}
+SCOPE=${SCOPE:-lifelong}
+# scope 를 태그에 짧게: lifelong -> LL, all -> ALL
+SCOPE_TAG=$([ "${SCOPE}" = "all" ] && echo ALL || echo LL)
 FORM=${FORM:-dea}
 ENTRY=${ENTRY:-Lotus_L3_V7dea.py}
 N_EVAL=${N_EVAL:-0}            # 0 = 학습 config.json 값을 그대로
@@ -36,7 +39,7 @@ ts "════ 롤아웃 전담 — suite=${SUITE} β${BETA} K${LIFELONG_K}, �
 python -c "import torch;print(f'    GPU {torch.cuda.device_count()}개  {torch.cuda.get_device_name(0)}')" 2>/dev/null
 
 for SEED in ${SEEDS}; do
-    RUN="results/lotus_l3_${FORM}_b${BETA}_k${LIFELONG_K}_${SUITE}_seed${SEED}"
+    RUN="results/lotus_l3_${FORM}_b${BETA}_k${LIFELONG_K}_scope${SCOPE_TAG}_${SUITE}_seed${SEED}"
     # 학습이 아직 config.json 조차 안 썼으면 생길 때까지 기다린다
     while [ ! -f "${RUN}/config.json" ]; do
         ts "⏳ ${RUN}/config.json 대기 (${POLL}s)"; sleep "${POLL}"

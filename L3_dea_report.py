@@ -36,13 +36,20 @@ OUT = RES / "L2_V3dea_SR_matrix.txt"
 SUITES = ("goal", "object", "50")
 
 
+SCOPE = os.environ.get("SCOPE_TAG", "LL")   # LL = lifelong(기본), ALL = base 포함
+
+
 def run_dir(beta: float, k: int, suite: str, seed: int) -> Path:
-    """β 표기가 두 가지다 (런처는 "2.0", 파이썬 :g 는 "2"). 있는 쪽을 쓴다."""
+    """β 표기가 두 가지다 (런처는 "2.0", 파이썬 :g 는 "2"). 있는 쪽을 쓴다.
+
+    ★ 태그에 scope 가 들어간다. base 를 과거로 세던 예전 런(INVALID.md 가 들어
+      있는 폴더)은 이 패턴에 걸리지 않으므로 리포트에 섞이지 않는다.
+    """
     for b in (f"{beta:.1f}", f"{beta:g}"):
-        d = RES / f"lotus_l3_dea_b{b}_k{k}_{suite}_seed{seed}"
+        d = RES / f"lotus_l3_dea_b{b}_k{k}_scope{SCOPE}_{suite}_seed{seed}"
         if d.is_dir():
             return d
-    return RES / f"lotus_l3_dea_b{beta:.1f}_k{k}_{suite}_seed{seed}"
+    return RES / f"lotus_l3_dea_b{beta:.1f}_k{k}_scope{SCOPE}_{suite}_seed{seed}"
 
 
 def read_R(d: Path):
@@ -152,7 +159,11 @@ def main() -> None:
     add("=" * W)
     add(f"갱신 {time.strftime('%F %T')}")
     add("")
-    add("설정  Lotus_L3_V7dea.py  앵커 dea / 액션공간 / reduce=mean / hard_linear")
+    add(f"설정  Lotus_L3_V7dea.py  앵커 dea / 액션공간 / reduce=mean / hard_linear")
+    add(f"      anchor_scope={'lifelong (base 는 과거로 세지 않는다)' if SCOPE == 'LL' else 'all (base 포함)'}")
+    add("      ★ base 를 과거로 세면 앵커 예산이 **점수에 안 들어가는** 태스크로 간다 —")
+    add("        지표는 base 를 재지 않는다. 그렇게 돌린 예전 런은 폴더 안 INVALID.md")
+    add("        로 표기해 뒀고 이 표에는 섞이지 않는다.")
     add(f"      lifelong 코드북 K={a.k} (태스크당 고정),  base K = k_per_demo x demo = 100")
     add("      lifelong stage 당 10,000 step · 태스크당 10 demo · batch 32 · λ_lvl 3.0")
     add("      평가 칸당 20 rollout · eval seed 7 고정 (train seed 만 7/42/1000)")

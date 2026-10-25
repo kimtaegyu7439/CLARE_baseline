@@ -16,7 +16,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; cd "${HERE}"
 SUITE=${SUITE:?SUITE (goal|object|50)}
 SEEDS=${SEEDS:-"7 42 1000"}
 BETA=${BETA:-3.0}
-LIFELONG_K=${LIFELONG_K:-25}     # L3: lifelong 코드북 셀 수를 태스크당 고정
+LIFELONG_K=${LIFELONG_K:-25}
+SCOPE=${SCOPE:-lifelong}
+# scope 를 태그에 짧게: lifelong -> LL, all -> ALL
+SCOPE_TAG=$([ "${SCOPE}" = "all" ] && echo ALL || echo LL)     # L3: lifelong 코드북 셀 수를 태스크당 고정
 ENTRY=${ENTRY:-Lotus_L3_V7dea.py}
 FORM=${FORM:-dea}
 SPACE=${SPACE:-act}
@@ -47,7 +50,7 @@ python -c "import torch;print(f'    GPU {torch.cuda.device_count()}개  {torch.c
 
 for SEED in ${SEEDS}; do
     # ★ 태그에 K 를 넣는다 — K=20 으로 돌린 기존 lotus_v7_dea_* 과 섞이면 안 된다.
-    TAG="lotus_l3_${FORM}_b${BETA}_k${LIFELONG_K}_${SUITE}_seed${SEED}"
+    TAG="lotus_l3_${FORM}_b${BETA}_k${LIFELONG_K}_scope${SCOPE_TAG}_${SUITE}_seed${SEED}"
     OUT="results/${TAG}"
     # ★ metrics.json 으로 판단하면 안 된다 — 롤아웃 전담 파드가 **첫 칸을 잴 때**
     #   이미 그 파일을 만든다. 그걸 "완주"로 읽으면 학습이 안 끝난 시드를
@@ -58,7 +61,7 @@ for SEED in ${SEEDS}; do
     fi
     mkdir -p "${OUT}"
     ARGS=(--suite "${SUITE}" --steps "${STEPS}"
-          --lifelong_k "${LIFELONG_K}"
+          --lifelong_k "${LIFELONG_K}" --anchor_scope "${SCOPE}"
           --anchor_form "${FORM}" --beta "${BETA}" --eps_w "${EPS_W}"
           --dir_space "${SPACE}" --anchor_reduce "${REDUCE}"
           --sampler_mode hard_linear
@@ -83,7 +86,7 @@ done
 
 ts "════ ${SUITE} 전부 종료 ════"
 for SEED in ${SEEDS}; do
-    TAG="lotus_l3_${FORM}_b${BETA}_k${LIFELONG_K}_${SUITE}_seed${SEED}"
+    TAG="lotus_l3_${FORM}_b${BETA}_k${LIFELONG_K}_scope${SCOPE_TAG}_${SUITE}_seed${SEED}"
     printf '  %-52s %s\n' "${TAG}" \
         "$([ -f "results/${TAG}/metrics_train.json" ] \
             || grep -q '\[LOTUS\] 완료' "results/${TAG}/train.log" 2>/dev/null \
