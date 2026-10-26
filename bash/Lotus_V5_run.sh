@@ -32,6 +32,7 @@ SCOPE=${SCOPE:-lifelong}   # 앵커가 보존할 과거의 범위 (base 는 세�
 SCOPE_TAG=$([ "${SCOPE}" = "all" ] && echo ALL || echo LL)
 LIFELONG_K=${LIFELONG_K:-25}
 LAM=${LAM:-1.0}
+WARM=${WARM:-0}          # L2_V5_warmup: 스테이지 내 앵커 warmup 비율 (0 = 끔)
 REDUCE=${REDUCE:-mean}
 STEPS=${STEPS:-10000}
 N_EVAL=${N_EVAL:-20}
@@ -47,7 +48,8 @@ mkdir -p logs results
 #          런 10 개가 전부 그 값이라, **1.0 일 때만 생략**해 이름을 유지한다
 #          (이미 돌고 있는 런의 --out 경로를 바꾸면 그 프로세스가 깨진다).
 LAM_TAG=$([ "${LAM}" = "1.0" ] && echo "" || echo "_lam${LAM}")
-tag_of() { echo "lotus_v5${SPACE}_c${2}${LAM_TAG}_k${LIFELONG_K}_scope${SCOPE_TAG}_${1}_seed${3}"; }
+WARM_TAG=$([ "${WARM}" = "0" ] && echo "" || echo "_warm${WARM}")   # 0 이면 생략(기존 이름 유지)
+tag_of() { echo "lotus_v5${SPACE}_c${2}${LAM_TAG}${WARM_TAG}_k${LIFELONG_K}_scope${SCOPE_TAG}_${1}_seed${3}"; }
 
 # 학습이 끝났나 — 보통 런은 LC.main 이 맨 끝에만 찍는 "[LOTUS] 완료".
 # metrics.json 으로 보면 안 된다(롤아웃 워커가 첫 칸에서 만든다).
@@ -89,7 +91,7 @@ run_one() {
             python -u "${ENTRY}" --setting lotus \
                 --anchor_c "${C}" --dir_space "${SPACE}" --anchor_reduce "${REDUCE}" \
                 --lambda_level "${LAM}" --lifelong_k "${LIFELONG_K}" \
-                --anchor_scope "${SCOPE}" \
+                --anchor_scope "${SCOPE}" --anchor_warmup "${WARM}" \
                 --suite "${SUITE}" --steps "${STEPS}" --sampler_mode hard_linear \
                 --skip_base_eval --seed "${SEED}" --eval_seed "${EVAL_SEED}" \
                 --eval_episodes "${N_EVAL}" --eval_batch_size "${N_EVAL}" \
@@ -102,7 +104,7 @@ run_one() {
     } >> "${LOG}" 2>&1
 }
 
-echo "════ L2_V5 (${SPACE}) LOTUS — λ_lvl=${LAM}, c, K=${LIFELONG_K}, scope=${SCOPE}, 시드 ${SEEDS} ════"
+echo "════ L2_V5 (${SPACE}) LOTUS — λ_lvl=${LAM}, warmup=${WARM}, K=${LIFELONG_K}, scope=${SCOPE}, 시드 ${SEEDS} ════"
 for j in ${JOBS}; do
     IFS=: read -r SUITE C GPU <<< "${j}"
     t=$(tag_of "${SUITE}" "${C}" "$(echo ${SEEDS} | awk '{print $1}')")
@@ -111,7 +113,7 @@ for j in ${JOBS}; do
     fi
     setsid nohup bash -c "$(declare -f tag_of train_done run_one); \
         SEEDS='${SEEDS}' SPACE='${SPACE}' SCOPE='${SCOPE}' SCOPE_TAG='${SCOPE_TAG}' \
-        LAM_TAG='${LAM_TAG}' \
+        LAM_TAG='${LAM_TAG}' WARM='${WARM}' WARM_TAG='${WARM_TAG}' \
         LIFELONG_K='${LIFELONG_K}' LAM='${LAM}' \
         REDUCE='${REDUCE}' STEPS='${STEPS}' N_EVAL='${N_EVAL}' \
         EVAL_SEED='${EVAL_SEED}' NW='${NW}' OMP_THREADS='${OMP_THREADS}' \

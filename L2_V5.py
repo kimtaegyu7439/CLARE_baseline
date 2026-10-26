@@ -90,6 +90,25 @@ import torch
 # ════════════════════════════════════════════════════════════════════════════
 #  공통 — 방향 항 계수
 # ════════════════════════════════════════════════════════════════════════════
+def warmup_mult(step_in_stage: int, steps: int, frac: float) -> float:
+    """스테이지 안에서 앵커 세기를 0 → 1 로 올리는 배율.
+
+    frac=0 이면 항상 1 (warmup 없음). frac=0.25 면 스테이지의 처음 25% 스텝
+    동안 선형으로 올라가 그 뒤 1 에 머문다.
+
+    ── 왜 필요한가 (L2_V5_warmup) ──────────────────────────────────────────
+    FWT 는 스테이지 **끝**에서 잰다. 그런데 LOTUS 의 lifelong 태스크는 10 demo
+    뿐이라 FM 신호가 약하고, 앵커가 초반부터 세게 걸리면 새 태스크 학습을
+    누른다. 실측으로 object t9(과거 3개와 장면·동작이 같고 대상 물체만 다름)의
+    FWT 가 seq-FT 95 → V5 65 / dea 30~40 으로 무너졋다. 초반에는 앵커를 풀어
+    새 태스크를 seq-FT 속도로 배우게 하고, 앵커는 뒤에서 드리프트만 막게 한다.
+    """
+    if frac <= 0:
+        return 1.0
+    warm = max(1, int(round(steps * frac)))
+    return min(1.0, step_in_stage / warm)
+
+
 def speedinv_coef(r_t: torch.Tensor, c: float) -> torch.Tensor:
     """방향 항의 계수 1/(r_T² + c). (B,H) -> (B,H).
 
@@ -143,6 +162,12 @@ def _clare_anchor_class():
             P = getattr(self.a, "pose_dims", None) or B1.POSE_DIMS
             c = float(self.a.anchor_c)
             inv_N = (1.0 / N) if self.a.anchor_reduce == "mean" else 1.0
+            # ★ warmup: 태스크 k 가 바뀌면 스텝 카운터를 0 으로. 한 스텝에 한 번 불린다.
+            if getattr(self, "_warm_k", None) != k:
+                self._warm_k, self._warm_step = k, 0
+            wmult = warmup_mult(self._warm_step, int(self.a.steps_per_task),
+                                float(getattr(self.a, "anchor_warmup", 0.0)))
+            self._warm_step += 1
 
             qs = [self._query(policy, batch, x_t, t, k, instructions, j, n,
                               st_shape, tcol, device) for j in js]
@@ -154,7 +179,7 @@ def _clare_anchor_class():
                 coef = speedinv_coef(r_t, c) * inv_N
                 L_m = inv_N * m.mean()
                 L_e = torch.where(valid, coef * e, torch.zeros_like(e)).mean()
-                (B1.LAMBDA_ANCHOR * self.lam_lvl * (L_m + L_e)).backward()
+                (B1.LAMBDA_ANCHOR * self.lam_lvl * wmult * (L_m + L_e)).backward()
                 logs["m"].append(float(m.mean().detach()))
                 logs["e"].append(float(e[valid].mean().detach()) if valid.any() else 0.0)
                 logs["w"].append(float(coef.mean()))
@@ -163,7 +188,7 @@ def _clare_anchor_class():
             self.t_anchor += time.perf_counter() - t0w
             if self.step % self.a.log_every_anchor == 0:
                 rec = {"task": k, "step": self.step, "form": "speedinv_dir",
-                       "c": c, "N": N,
+                       "c": c, "N": N, "warm_mult": round(wmult, 4),
                        "m_mean": sum(logs["m"]) / N, "e_mean": sum(logs["e"]) / N,
                        "w_mean": sum(logs["w"]) / N, "w_max": max(logs["w"]),
                        "ms_per_step": 1000 * self.t_anchor / max(self.step, 1)}
@@ -196,6 +221,7 @@ def run_clare(opt) -> None:
         "setting": "clare",
         "anchor_c": args.anchor_c, "dir_space": args.dir_space,
         "anchor_reduce": args.anchor_reduce, "pose_dims": args.pose_dims,
+        "anchor_warmup": args.anchor_warmup,
         "sampler_mode": args.sampler_mode, "codebook_k": args.codebook_k,
         "lambda_level": args.lambda_level, "seed": args.seed,
         "eval_seed": args.eval_seed, "eval_episodes": args.eval_episodes,
@@ -221,12 +247,22 @@ def _lotus_anchor_loss(opt):
     import Lotus_L3_V7dea as LC
     from L2_V6 import split_mag_dir, to_action
 
+    # ★ warmup 상태. anchor_loss 는 한 스텝에 정확히 한 번 불린다. 스테이지가
+    #   바뀌면 books 의 크기가 바뀌므로(태스크 수) 그걸로 경계를 잡는다.
+    #   (anchor_loss 시그니처에 step 이 없어서 드라이버를 안 고치고 이렇게 센다.)
+    wstate = {"N": None, "step": 0}
+
     def anchor_loss(policy, teacher, books, instructions, x_t, t, st_shape, cls_dim,
                     lam_lvl, device, args=None, diag=None):
         js = sorted(books)
         if not js:
             return torch.zeros((), device=device)
         N = len(js)
+        if wstate["N"] != N:
+            wstate["N"], wstate["step"] = N, 0
+        steps = int(getattr(args, "steps", 10000)) if args else 10000
+        wmult = warmup_mult(wstate["step"], steps, float(opt.anchor_warmup))
+        wstate["step"] += 1
         n = x_t.shape[0]
         tcol = t[:, None, None]
         c = float(opt.anchor_c)
@@ -266,13 +302,16 @@ def _lotus_anchor_loss(opt):
             coef = speedinv_coef(r_t, c) * inv_N
             L_j = inv_N * m.mean() + torch.where(
                 valid, coef * e, torch.zeros_like(e)).mean()
-            (LC.LAMBDA_ANCHOR * lam_lvl * L_j).backward()
+            (LC.LAMBDA_ANCHOR * lam_lvl * wmult * L_j).backward()
             lvl.append(L_j.detach())
             if diag is not None:
                 # LC 의 로그가 w_mean/w_max 쌍을 함께 읽고 함께 비운다.
-                diag.setdefault("w_mean", []).append(float(coef.mean()))
-                diag.setdefault("w_max", []).append(float(coef.max()))
-        return (lam_lvl * (sum(lvl) / N)).detach()
+                # ★ 계수에 warmup 배율을 곱해 찍는다 — 로그의 anc_w 가 실제로 걸린
+                #   세기를 보여야 한다. 초반 스텝에서 0 에 가깝게 보이는 게 정상이다.
+                diag.setdefault("w_mean", []).append(float(coef.mean()) * wmult)
+                diag.setdefault("w_max", []).append(float(coef.max()) * wmult)
+        # 반환(로그용)에도 배율을 곱한다 — 실제로 backward 된 크기와 맞춘다.
+        return (lam_lvl * wmult * (sum(lvl) / N)).detach()
 
     return LC, anchor_loss
 
@@ -357,6 +396,14 @@ def selftest() -> int:
     bad += not ok
     print(f"  ⑤ to_action 가역·모양 보존 : {'OK' if ok else '✗'}")
 
+    # ⑥ warmup 배율: 0→1 선형, 끝나면 1 고정, frac=0 이면 항상 1
+    ws = [warmup_mult(s, 10000, 0.25) for s in (0, 1250, 2500, 5000, 9999)]
+    ok = (abs(ws[0] - 0.0) < 1e-12 and abs(ws[1] - 0.5) < 1e-12 and ws[2] == 1.0
+          and ws[3] == 1.0 and ws[4] == 1.0 and warmup_mult(0, 10000, 0.0) == 1.0)
+    bad += not ok
+    print(f"  ⑥ warmup(0.25, 10k): step 0→{ws[0]:.2f}  1250→{ws[1]:.2f}  "
+          f"2500→{ws[2]:.2f}  5000→{ws[3]:.2f}  frac=0→{warmup_mult(0,10000,0.0):.0f}"
+          f"  {'OK' if ok else '✗'}")
     print()
     print("전부 통과" if bad == 0 else f"✗ {bad} 항목 불일치")
     return 1 if bad else 0
@@ -381,6 +428,11 @@ def main() -> None:
                         "sum = 기존 V4/V5 거동(과거 수에 비례)")
     p.add_argument("--pose_dims", type=int, default=0,
                    help="0 이면 드라이버의 POSE_DIMS(6, gripper 제외). 7 로 두면 전 축")
+    p.add_argument("--anchor_warmup", type=float, default=0.0,
+                   help="L2_V5_warmup: 스테이지 안에서 앵커 세기를 처음 이 비율의 스텝 "
+                        "동안 0→1 로 선형 상승 (예 0.25 = 처음 25%%). 0 = 끔. "
+                        "FWT 는 스테이지 끝에서 재므로, 초반에 새 태스크를 앵커 없이 "
+                        "배우게 두고 뒤에서 드리프트만 막는다")
     # ── 앵커 세기 / 코드북 ─────────────────────────────────────────────────
     p.add_argument("--lambda_level", type=float, default=1.0,
                    help="앵커 손실 앞에 곱하는 계수. 최종 손실 L = L_FM + λ_lvl·L_anchor "
