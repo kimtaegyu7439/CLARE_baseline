@@ -216,7 +216,7 @@ def main() -> None:
                     help="비교할 λ_lvl 목록. λ 는 앵커 손실 앞의 계수다")
     ap.add_argument("--warms", default=os.environ.get("WARMS", "0 0.25"),
                     help="비교할 warmup 비율 목록. 0 = 없음(V5), 0.25 = L2_V5_warmup")
-    ap.add_argument("--v13_betas", default=os.environ.get("V13_BETAS", "3.0"),
+    ap.add_argument("--v13_betas", default=os.environ.get("V13_BETAS", "3.0 4.0"),
                     help="V13(dea W_e 를 크기+방향에 공유) 런의 β 목록. 빈 문자열이면 절 생략")
     ap.add_argument("--v13_lam", default=os.environ.get("V13_LAM", "3.0"))
     ap.add_argument("--out", default=os.environ.get("OUT", ""),
