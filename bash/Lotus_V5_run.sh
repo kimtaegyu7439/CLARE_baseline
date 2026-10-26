@@ -41,8 +41,13 @@ OMP_THREADS=${OMP_THREADS:-6}
 ENTRY=${ENTRY:-L2_V5.py}
 
 mkdir -p logs results
-# ★ 태그에 scope 를 넣는다 — base 를 과거로 세던 예전 런(INVALID.md)과 섞이면 안 된다.
-tag_of() { echo "lotus_v5${SPACE}_c${2}_k${LIFELONG_K}_scope${SCOPE_TAG}_${1}_seed${3}"; }
+# ★ 태그에 scope 와 λ 를 넣는다.
+#   scope: base 를 과거로 세던 예전 런(INVALID.md)과 섞이면 안 된다.
+#   λ    : 앵커 세기가 다르면 다른 팔이다. λ=1.0 은 L2_V5 의 기본값이고 기존
+#          런 10 개가 전부 그 값이라, **1.0 일 때만 생략**해 이름을 유지한다
+#          (이미 돌고 있는 런의 --out 경로를 바꾸면 그 프로세스가 깨진다).
+LAM_TAG=$([ "${LAM}" = "1.0" ] && echo "" || echo "_lam${LAM}")
+tag_of() { echo "lotus_v5${SPACE}_c${2}${LAM_TAG}_k${LIFELONG_K}_scope${SCOPE_TAG}_${1}_seed${3}"; }
 
 # 학습이 끝났나 — 보통 런은 LC.main 이 맨 끝에만 찍는 "[LOTUS] 완료".
 # metrics.json 으로 보면 안 된다(롤아웃 워커가 첫 칸에서 만든다).
@@ -53,7 +58,7 @@ train_done() {
 already_running() { pgrep -f "L2_V5.py .*--out results/$1( |$)" >/dev/null 2>&1; }
 
 if [ -n "${DRY:-}" ]; then
-    echo "L2_V5 (${SPACE} 공간) LOTUS 셋팅  λ_lvl=${LAM}  lifelong K=${LIFELONG_K}  steps ${STEPS}"
+    echo "L2_V5 (${SPACE} 공간) LOTUS 셋팅  λ_lvl=${LAM}${LAM_TAG:+ (태그 ${LAM_TAG})}  lifelong K=${LIFELONG_K}  steps ${STEPS}"
     for j in ${JOBS}; do
         IFS=: read -r SU C G <<< "${j}"
         for s in ${SEEDS}; do
@@ -97,7 +102,7 @@ run_one() {
     } >> "${LOG}" 2>&1
 }
 
-echo "════ L2_V5 (${SPACE}) LOTUS — λ_lvl=${LAM}, K=${LIFELONG_K}, scope=${SCOPE}, 시드 ${SEEDS} ════"
+echo "════ L2_V5 (${SPACE}) LOTUS — λ_lvl=${LAM}, c, K=${LIFELONG_K}, scope=${SCOPE}, 시드 ${SEEDS} ════"
 for j in ${JOBS}; do
     IFS=: read -r SUITE C GPU <<< "${j}"
     t=$(tag_of "${SUITE}" "${C}" "$(echo ${SEEDS} | awk '{print $1}')")
@@ -106,6 +111,7 @@ for j in ${JOBS}; do
     fi
     setsid nohup bash -c "$(declare -f tag_of train_done run_one); \
         SEEDS='${SEEDS}' SPACE='${SPACE}' SCOPE='${SCOPE}' SCOPE_TAG='${SCOPE_TAG}' \
+        LAM_TAG='${LAM_TAG}' \
         LIFELONG_K='${LIFELONG_K}' LAM='${LAM}' \
         REDUCE='${REDUCE}' STEPS='${STEPS}' N_EVAL='${N_EVAL}' \
         EVAL_SEED='${EVAL_SEED}' NW='${NW}' OMP_THREADS='${OMP_THREADS}' \

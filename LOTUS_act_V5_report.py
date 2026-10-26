@@ -41,13 +41,21 @@ SPACE = os.environ.get("SPACE", "act")
 SCOPE_TAG = os.environ.get("SCOPE_TAG", "LL")
 
 
-def run_dir(c: float, k: int, suite: str, seed: int) -> Path:
-    """c 표기가 여러 가지다 (런처는 "0.1"/"0.01", 파이썬 :g 도 같다). 있는 쪽을 쓴다."""
-    for cs in (f"{c:g}", f"{c}", f"{c:.2f}"):
-        d = RES / f"lotus_v5{SPACE}_c{cs}_k{k}_scope{SCOPE_TAG}_{suite}_seed{seed}"
-        if d.is_dir():
-            return d
-    return RES / f"lotus_v5{SPACE}_c{c:g}_k{k}_scope{SCOPE_TAG}_{suite}_seed{seed}"
+def run_dir(c: float, k: int, suite: str, seed: int, lam: float = 1.0) -> Path:
+    """c 표기가 여러 가지다 (런처는 "0.1"/"0.01", 파이썬 :g 도 같다). 있는 쪽을 쓴다.
+
+    ★ λ 는 **1.0 일 때 태그에서 생략**된다 — L2_V5 의 기본값이고 기존 런 10 개가
+      그 이름으로 이미 있다. 그래서 lam 접미사가 붙은 이름과 안 붙은 이름을
+      둘 다 시도한다.
+    """
+    lam_tags = ["", f"_lam{lam:g}", f"_lam{lam:.1f}"] if abs(lam - 1.0) < 1e-9 \
+        else [f"_lam{lam:g}", f"_lam{lam:.1f}"]
+    for lt in lam_tags:
+        for cs in (f"{c:g}", f"{c}", f"{c:.2f}"):
+            d = RES / f"lotus_v5{SPACE}_c{cs}{lt}_k{k}_scope{SCOPE_TAG}_{suite}_seed{seed}"
+            if d.is_dir():
+                return d
+    return RES / f"lotus_v5{SPACE}_c{c:g}{lam_tags[0]}_k{k}_scope{SCOPE_TAG}_{suite}_seed{seed}"
 
 
 def read_report_txt(d: Path):
@@ -200,6 +208,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--cs", default=os.environ.get("CS", "0.1 0.01"),
                     help="비교할 c 값 목록")
+    ap.add_argument("--lams", default=os.environ.get("LAMS", "1.0 2.0"),
+                    help="비교할 λ_lvl 목록. λ 는 앵커 손실 앞의 계수다")
     ap.add_argument("--k", type=int, default=int(os.environ.get("LIFELONG_K", "25")))
     # ★ 기본을 세 시드로 둔다. report_loop 은 인자 없이 돌리므로 기본값이
     #   "7" 이면 seed 42/1000 런이 자동 생성 파일에 안 들어간다.
@@ -209,6 +219,7 @@ def main() -> None:
     ap.add_argument("--no-write", action="store_true")
     a = ap.parse_args()
     cs = [float(x) for x in a.cs.split()]
+    lams = [float(x) for x in a.lams.split()]
     seeds = [int(x) for x in a.seeds.split()]
 
     L: list[str] = []
@@ -245,12 +256,13 @@ def main() -> None:
     add("-" * W)
     add("c x 스위트 x 시드")
     add("-" * W)
-    add(f"  {'c':>7}{'suite':>9}{'seed':>6}{'AvgSR':>9}{'FWT↑':>9}{'NBT↓':>9}"
+    add(f"  {'λ':>5}{'c':>7}{'suite':>9}{'seed':>6}{'AvgSR':>9}{'FWT↑':>9}{'NBT↓':>9}"
         f"{'AUC↑':>9}{'칸':>8}   상태")
-    for c in cs:
+    for lam in lams:
+      for c in cs:
         for suite in SUITES:
             for sd in seeds:
-                d = run_dir(c, a.k, suite, sd)
+                d = run_dir(c, a.k, suite, sd, lam)
                 if not d.is_dir():
                     continue          # 안 돌린 조합은 표에 넣지 않는다
                 R, la, src = read_R(d)
@@ -268,12 +280,12 @@ def main() -> None:
                 else:
                     note = "폴더만 있음"
                 if m is None:
-                    add(f"  {c:>7g}{suite:>9}{sd:>6}" + f"{'-':>9}" * 4
+                    add(f"  {lam:>5g}{c:>7g}{suite:>9}{sd:>6}" + f"{'-':>9}" * 4
                         + f"{'-':>8}   {note}")
                     continue
                 star = "" if m["done"] else "*"
-                add("  {:>7g}{:>9}{:>6}{:>9}{:>9}{:>9}{:>9}{:>8}   {}".format(
-                    c, suite, sd, fmt(m["AvgSR"]) + star, fmt(m["FWT"]),
+                add("  {:>5g}{:>7g}{:>9}{:>6}{:>9}{:>9}{:>9}{:>9}{:>8}   {}".format(
+                    lam, c, suite, sd, fmt(m["AvgSR"]) + star, fmt(m["FWT"]),
                     fmt(m["NBT"], True), fmt(m["AUC"]),
                     "{}/{}".format(m["have"], m["need"]),
                     "완주" if m["done"] else note))
@@ -281,30 +293,41 @@ def main() -> None:
 
     # ── c 비교 (같은 스위트·시드에서 c 끼리) ────────────────────────────────
     add("=" * W)
-    add("c 비교 — 같은 스위트/시드에서만 맞댄다")
+    add("λ x c 집계 — 완주한 시드만, ± 는 시드 간 표본표준편차(ddof=1)")
     add("=" * W)
     for suite in SUITES:
-        rows = []
-        for c in cs:
-            for sd in seeds:
-                d = run_dir(c, a.k, suite, sd)
-                if not d.is_dir():
+        head = False
+        for lam in lams:
+            for c in cs:
+                g = []
+                for sd in seeds:
+                    d = run_dir(c, a.k, suite, sd, lam)
+                    if not d.is_dir():
+                        continue
+                    R, la, _ = read_R(d)
+                    m = lifelong(R, la)
+                    if m and m["done"]:
+                        g.append((sd, m))
+                if not g:
                     continue
-                R, la, _ = read_R(d)
-                m = lifelong(R, la)
-                if m:
-                    rows.append((c, sd, m))
-        if not rows:
-            continue
-        add("")
-        add(f"  libero_{suite}")
-        add(f"    {'c':>7}{'seed':>6}{'AvgSR':>9}{'FWT↑':>9}{'NBT↓':>9}{'AUC↑':>9}   비고")
-        for c, sd, m in rows:
-            star = "" if m["done"] else "*"
-            add("    {:>7g}{:>6}{:>9}{:>9}{:>9}{:>9}   {}".format(
-                c, sd, fmt(m["AvgSR"]) + star, fmt(m["FWT"]),
-                fmt(m["NBT"], True), fmt(m["AUC"]),
-                "완주" if m["done"] else f"{m['have']}/{m['need']}칸"))
+                if not head:
+                    add("")
+                    add(f"  libero_{suite}")
+                    add(f"    {'λ':>5}{'c':>7}{'n':>3}{'시드':>14}"
+                        f"{'AvgSR':>15}{'FWT↑':>15}{'NBT↓':>15}{'AUC↑':>15}")
+                    head = True
+                cols = []
+                for key in ("AvgSR", "FWT", "NBT", "AUC"):
+                    vals = [m[key] for _, m in g if m[key] is not None]
+                    if not vals:
+                        cols.append("-".rjust(15))
+                        continue
+                    mu = st.mean(vals)
+                    sign = "+" if key == "NBT" and mu >= 0 else ""
+                    cols.append((f"{sign}{mu:.1f} ± {st.stdev(vals):.1f}"
+                                 if len(vals) > 1 else f"{sign}{mu:.1f}").rjust(15))
+                add(f"    {lam:>5g}{c:>7g}{len(g):>3}"
+                    + ",".join(str(s) for s, _ in g).rjust(14) + "".join(cols))
     add("")
 
     # ── SR 행렬 ─────────────────────────────────────────────────────────────
@@ -313,22 +336,23 @@ def main() -> None:
     add("         base 열은 비어 있다 — 재지 않는다(--skip_base_eval)")
     add("=" * W)
     add("")
-    for c in cs:
+    for lam in lams:
+      for c in cs:
         for suite in SUITES:
             for sd in seeds:
-                d = run_dir(c, a.k, suite, sd)
+                d = run_dir(c, a.k, suite, sd, lam)
                 if not d.is_dir():
                     continue
                 R, la, src = read_R(d)
                 add("-" * W)
                 if not R:
-                    add(f"c={c:g} {suite} seed{sd}   ({d.name})   — SR 없음")
+                    add(f"λ={lam:g} c={c:g} {suite} seed{sd}   ({d.name})   — SR 없음")
                     add("-" * W)
                     add("")
                     continue
                 m = lifelong(R, la)
                 tail = "   {}/{}칸".format(m["have"], m["need"]) if m else ""
-                add(f"c={c:g} {suite} seed{sd}   ({d.name})   출처 {src}" + tail)
+                add(f"λ={lam:g} c={c:g} {suite} seed{sd}   ({d.name})   출처 {src}" + tail)
                 add("-" * W)
                 nt = max(len(r) for r in R)
                 add(f"{'stage':<7}" + "".join(f"{'t'+str(t):>5}" for t in range(nt)))
