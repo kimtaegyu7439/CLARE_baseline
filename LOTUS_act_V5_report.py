@@ -201,7 +201,10 @@ def main() -> None:
     ap.add_argument("--cs", default=os.environ.get("CS", "0.1 0.01"),
                     help="비교할 c 값 목록")
     ap.add_argument("--k", type=int, default=int(os.environ.get("LIFELONG_K", "25")))
-    ap.add_argument("--seeds", default=os.environ.get("SEEDS", "7"))
+    # ★ 기본을 세 시드로 둔다. report_loop 은 인자 없이 돌리므로 기본값이
+    #   "7" 이면 seed 42/1000 런이 자동 생성 파일에 안 들어간다.
+    #   폴더가 없는 조합은 표에서 조용히 건너뛰므로 넉넉히 두는 게 맞다.
+    ap.add_argument("--seeds", default=os.environ.get("SEEDS", "7 42 1000"))
     ap.add_argument("--lam", default=os.environ.get("LAM", "1.0"))
     ap.add_argument("--no-write", action="store_true")
     a = ap.parse_args()
