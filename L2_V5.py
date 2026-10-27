@@ -176,7 +176,7 @@ def _clare_anchor_class():
                 v_s = self._student_v(policy, q, t)
                 p_s, p_t = self._pair(v_s, q, t)
                 m, e, r_s, r_t, valid = split_mag_dir(p_s, p_t, P)   # 각 (B,H)
-                coef = speedinv_coef(r_t, c) * inv_N
+                coef = speedinv_coef(r_t, c) * inv_N * float(self.a.beta)   # β: 방향 항 배율
                 L_m = inv_N * m.mean()
                 L_e = torch.where(valid, coef * e, torch.zeros_like(e)).mean()
                 (B1.LAMBDA_ANCHOR * self.lam_lvl * wmult * (L_m + L_e)).backward()
@@ -221,7 +221,7 @@ def run_clare(opt) -> None:
         "setting": "clare",
         "anchor_c": args.anchor_c, "dir_space": args.dir_space,
         "anchor_reduce": args.anchor_reduce, "pose_dims": args.pose_dims,
-        "anchor_warmup": args.anchor_warmup,
+        "anchor_warmup": args.anchor_warmup, "beta": args.beta,
         "sampler_mode": args.sampler_mode, "codebook_k": args.codebook_k,
         "lambda_level": args.lambda_level, "seed": args.seed,
         "eval_seed": args.eval_seed, "eval_episodes": args.eval_episodes,
@@ -299,7 +299,7 @@ def _lotus_anchor_loss(opt):
             else:
                 p_s, p_t = v_s, v_t
             m, e, r_s, r_t, valid = split_mag_dir(p_s, p_t, P)
-            coef = speedinv_coef(r_t, c) * inv_N
+            coef = speedinv_coef(r_t, c) * inv_N * float(opt.beta)       # β: 방향 항 배율
             L_j = inv_N * m.mean() + torch.where(
                 valid, coef * e, torch.zeros_like(e)).mean()
             (LC.LAMBDA_ANCHOR * lam_lvl * wmult * L_j).backward()
@@ -332,9 +332,10 @@ def run_lotus(opt) -> None:
     # ★ print 로 찍는다. 드라이버가 init_logging() 을 부르기 **전**이라
     #   logging.info 는 핸들러가 없어 조용히 삼켜진다 (실측: train.log 에 안 남음).
     #   설정 자체는 드라이버가 config.json 에 덤프하므로 기록은 그쪽이 정본이다.
-    print(f"[V5] LOTUS — 방향계수 1/(r_T²+c)  c={opt.anchor_c}  "
+    print(f"[V5] LOTUS — 방향계수 β/(r_T²+c)  c={opt.anchor_c}  β={opt.beta}  "
           f"space={opt.dir_space}  reduce={opt.anchor_reduce}  "
-          f"λ_lvl={opt.lambda_level}  lifelong_K={opt.lifelong_k}", flush=True)
+          f"λ_lvl={opt.lambda_level}  lifelong_K={opt.lifelong_k}  warmup={opt.anchor_warmup}",
+          flush=True)
     try:
         LC.main()
     finally:
@@ -404,6 +405,12 @@ def selftest() -> int:
     print(f"  ⑥ warmup(0.25, 10k): step 0→{ws[0]:.2f}  1250→{ws[1]:.2f}  "
           f"2500→{ws[2]:.2f}  5000→{ws[3]:.2f}  frac=0→{warmup_mult(0,10000,0.0):.0f}"
           f"  {'OK' if ok else '✗'}")
+    # ⑦ β 는 방향 항에만 선형으로 걸린다 (크기 항 불변)
+    m_, e_, r_s_, r_t_, v_ = split_mag_dir(v_s, v_t, 6)
+    base = float(speedinv_coef(r_t_, 0.1).mean())
+    ok = abs(float((speedinv_coef(r_t_, 0.1) * 0.5).mean()) - 0.5 * base) < 1e-12
+    bad += not ok
+    print(f"  ⑦ β=0.5 → 방향 계수 평균 {0.5*base:.4f} = 0.5 × {base:.4f}  {'OK' if ok else '✗'}")
     print()
     print("전부 통과" if bad == 0 else f"✗ {bad} 항목 불일치")
     return 1 if bad else 0
@@ -428,6 +435,10 @@ def main() -> None:
                         "sum = 기존 V4/V5 거동(과거 수에 비례)")
     p.add_argument("--pose_dims", type=int, default=0,
                    help="0 이면 드라이버의 POSE_DIMS(6, gripper 제외). 7 로 두면 전 축")
+    p.add_argument("--beta", type=float, default=1.0,
+                   help="방향 항 배율. L_j = (1/N)[ m + β·coef·e ],  coef = 1/(r_T²+c). "
+                        "1.0 = 기존 V5. <1 이면 방향 항을 크기 항보다 약하게 — object 처럼 "
+                        "새 태스크와의 충돌이 방향(e)에서 날 때 쓴다. >1 이면 e 강조")
     p.add_argument("--anchor_warmup", type=float, default=0.0,
                    help="L2_V5_warmup: 스테이지 안에서 앵커 세기를 처음 이 비율의 스텝 "
                         "동안 0→1 로 선형 상승 (예 0.25 = 처음 25%%). 0 = 끔. "
@@ -455,8 +466,7 @@ def main() -> None:
     #   읽는다. 둘 다 덮었으니 지금은 안 쓰이지만, 상위 클래스가 바뀌어도
     #   AttributeError 로 죽지 않게 무해한 값을 실어 둔다.
     opt.anchor_form = "speedinv_dir"
-    opt.beta = 0.0
-    opt.eps_w = 0.0
+    opt.eps_w = 0.0            # DEAAnchor 상속 경로가 읽을 수 있어 무해한 값
     # 셋팅별 코드북 기본값. 두 셋팅의 K 규칙이 다르므로 여기서 갈라 둔다.
     if opt.setting == "clare":
         if opt.codebook_k is None:
