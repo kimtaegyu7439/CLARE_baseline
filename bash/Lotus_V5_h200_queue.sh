@@ -7,11 +7,12 @@
 #   nohup bash bash/Lotus_V5_h200_queue.sh > logs/h200_queue.out 2>&1 &
 #
 #   WAIT=0     기다리지 말고 바로 시작 (끊긴 뒤 이어 돌릴 때 — 완주/진행 중인 런은 건너뛴다)
+#   WAIT_PID=<pid>  지금 돌고 있는 드라이버 pid 가 끝난 뒤에 시작 (GPU 메모리 확인은 그 뒤에도 한다)
 #   MAXJOBS=3  병렬 수 (기본 4; 런당 VRAM ~5G, H200 141G 라 여유는 많고 CPU 가 병목)
 #   LAMS="2.0 3.0" BETAS="1.0 2.0 3.0" SEEDS="7 42 1000" 로 조합을 바꾼다
 #
 # "지금 돌고 있는 작업" 판정: nvidia-smi 의 GPU 메모리 사용량이 MEM_IDLE(MiB) 아래로
-# IDLE_CHECKS 번(60 초 간격) 연속 떨어지면 비었다고 본다. 컨테이너에서는 nvidia-smi 가
+# IDLE_CHECKS(기본 5)번(60 초 간격) 연속 떨어지면 비었다고 본다. 컨테이너에서는 nvidia-smi 가
 # 다른 프로세스의 PID 를 못 보여주므로 PID 가 아니라 메모리로 본다.
 #
 # 태그/로그/인자는 bash/Lotus_V5_run.sh 와 같다 — 결과 폴더가
@@ -35,7 +36,7 @@ MAXJOBS=${MAXJOBS:-4}
 GPU=${GPU:-0}
 WAIT=${WAIT:-1}
 MEM_IDLE=${MEM_IDLE:-1500}
-IDLE_CHECKS=${IDLE_CHECKS:-3}
+IDLE_CHECKS=${IDLE_CHECKS:-5}
 SPACE=act; SCOPE=lifelong; SCOPE_TAG=LL; LIFELONG_K=${LIFELONG_K:-25}; WARM=0; REDUCE=mean
 STEPS=${STEPS:-10000}; N_EVAL=${N_EVAL:-20}; EVAL_SEED=${EVAL_SEED:-7}
 ENTRY=${ENTRY:-L2_V5.py}
@@ -81,6 +82,13 @@ echo "[$(date '+%F %T')] ════ H200 큐 시작  ${SUITE} c=${C} λ∈{${L
 echo "  python ${PY}   NW=${NW} OMP=${OMP_THREADS}"
 
 # 1) 지금 돌고 있는 작업이 끝날 때까지
+#    WAIT_PID=<pid> 를 주면 그 프로세스(예: 지금 돌고 있는 스윕 드라이버)가 사라질 때까지
+#    먼저 기다리고, 그 다음 GPU 메모리로 한 번 더 확인한다.
+if [ -n "${WAIT_PID:-}" ]; then
+    echo "[$(date '+%F %T')] pid ${WAIT_PID} 가 끝날 때까지 대기"
+    while kill -0 "${WAIT_PID}" 2>/dev/null; do sleep 60; done
+    echo "[$(date '+%F %T')] pid ${WAIT_PID} 종료"
+fi
 if [ "${WAIT}" = "1" ]; then
     idle=0
     while :; do
