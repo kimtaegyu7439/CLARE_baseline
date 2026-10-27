@@ -28,14 +28,31 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-ROOT = Path("/home/sa090180/Datasets/lerobot/LOTUS_setting")
+# 경로는 환경변수를 먼저 보고(다른 서버), 없으면 서버1 의 기존 값을 쓴다.
+#   LOTUS_DATA_ROOT  = LOTUS_setting 디렉터리
+#   HF_LEROBOT_HOME  = 소스 데이터셋들이 있는 lerobot 루트 (bash/clare/env.sh 가 준다)
+_SERVER1_LEROBOT = "/home/sa090180/Datasets/lerobot"
+LEROBOT_HOME = Path(os.environ.get("HF_LEROBOT_HOME", _SERVER1_LEROBOT))
+ROOT = Path(os.environ.get("LOTUS_DATA_ROOT") or LEROBOT_HOME / "LOTUS_setting")
 MANIFEST = ROOT / "lotus_setting.json"
+
+
+def resolve_source(path: str) -> str:
+    """매니페스트의 소스 경로는 서버1 절대경로다. 그 경로가 없으면 접두사를
+    이 서버의 HF_LEROBOT_HOME 으로 바꿔 본다 (예: /home/jovyan/Datasets/lerobot/...)."""
+    if Path(path).exists() or not path.startswith(_SERVER1_LEROBOT + "/"):
+        return path
+    alt = LEROBOT_HOME / path[len(_SERVER1_LEROBOT) + 1:]
+    if alt.exists():
+        return str(alt)
+    raise SystemExit(f"소스 데이터셋이 없다: {path}  (대체 경로도 없음: {alt})")
 CHUNK = 1000
 REINDEXED = ("episode_index", "index", "task_index")
 
@@ -78,7 +95,7 @@ def build_split(name: str, out: Path, tasks: list[dict], cache: dict,
     plan = []                                   # (src_path, src_ep, instruction, task_ord)
     for ti, t in enumerate(tasks):
         a, b = t["episode_range"]
-        plan += [(t["dataset"], e, t["instruction"], ti) for e in range(a, b)]
+        plan += [(resolve_source(t["dataset"]), e, t["instruction"], ti) for e in range(a, b)]
 
     instrs = [t["instruction"] for t in tasks]              # 태스크 수 == len(tasks)
     n_ep, n_fr = len(plan), 0

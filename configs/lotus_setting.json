@@ -1,0 +1,998 @@
+{
+ "name": "LOTUS / M2Distill lifelong setting",
+ "source_of_split": "UT-Austin-RPL/Lotus  lotus/libero/benchmark/__init__.py  LIBERO_KITCHEN_EXP25 / EXP50 custom_task_order",
+ "verified": [
+  "yz90 episodes.jsonl 의 90개 블록(50 ep 씩) 순서 == libero_90 bddl 이름 정렬 (90/90)",
+  "libero_90 의 KITCHEN_SCENE task == 블록 0..45 (46개)",
+  "custom_task_order 의 <90 인덱스 합집합 == 0..45 (겹침 없음)",
+  "인덱스 92,93,98,99 -> 로컬 libero_10_image_task_ 2,3,8,9 == libero_10 의 KITCHEN 4개"
+ ],
+ "assumptions": [
+  "lifelong 5 스테이지 x 5 태스크는 custom_task_order 후반 25개를 순서대로 5개씩 자른 것",
+  "task 당 10 demo 는 각 태스크의 앞 10 에피소드"
+ ],
+ "experiments": {
+  "LIBERO-50": {
+   "n_tasks": 50,
+   "base_n_demos": 50,
+   "lifelong_n_demos": 10,
+   "base": [
+    {
+     "libero100_index": 0,
+     "source": "libero_90",
+     "scene": "KITCHEN_SCENE10",
+     "instruction": "close the top drawer of the cabinet",
+     "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+     "episode_range": [
+      0,
+      50
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 1,
+     "source": "libero_90",
+     "scene": "KITCHEN_SCENE10",
+     "instruction": "close the top drawer of the cabinet and put the black bowl on top of it",
+     "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+     "episode_range": [
+      50,
+      100
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 2,
+     "source": "libero_90",
+     "scene": "KITCHEN_SCENE10",
+     "instruction": "put the black bowl in the top drawer of the cabinet",
+     "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+     "episode_range": [
+      100,
+      150
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 6,
+     "source": "libero_90",
+     "scene": "KITCHEN_SCENE1",
+     "instruction": "open the bottom drawer of the cabinet",
+     "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+     "episode_range": [
+      300,
+      350
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 7,
+     "source": "libero_90",
+     "scene": "KITCHEN_SCENE1",
+     "instruction": "open the top drawer of the cabinet",
+     "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+     "episode_range": [
+      350,
+      400
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 11,
+     "source": "libero_90",
+     "scene": "KITCHEN_SCENE2",
+     "instruction": "open the top drawer of the cabinet",
+     "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+     "episode_range": [
+      550,
+      600
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 12,
+     "source": "libero_90",
+     "scene": "KITCHEN_SCENE2",
+     "instruction": "put the black bowl at the back on the plate",
+     "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+     "episode_range": [
+      600,
+      650
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 13,
+     "source": "libero_90",
+     "scene": "KITCHEN_SCENE2",
+     "instruction": "put the black bowl at the front on the plate",
+     "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+     "episode_range": [
+      650,
+      700
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 18,
+     "source": "libero_90",
+     "scene": "KITCHEN_SCENE3",
+     "instruction": "put the frying pan on the stove",
+     "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+     "episode_range": [
+      900,
+      950
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 19,
+     "source": "libero_90",
+     "scene": "KITCHEN_SCENE3",
+     "instruction": "put the moka pot on the stove",
+     "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+     "episode_range": [
+      950,
+      1000
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 20,
+     "source": "libero_90",
+     "scene": "KITCHEN_SCENE3",
+     "instruction": "turn on the stove",
+     "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+     "episode_range": [
+      1000,
+      1050
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 22,
+     "source": "libero_90",
+     "scene": "KITCHEN_SCENE4",
+     "instruction": "close the bottom drawer of the cabinet",
+     "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+     "episode_range": [
+      1100,
+      1150
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 23,
+     "source": "libero_90",
+     "scene": "KITCHEN_SCENE4",
+     "instruction": "close the bottom drawer of the cabinet and open the top drawer",
+     "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+     "episode_range": [
+      1150,
+      1200
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 24,
+     "source": "libero_90",
+     "scene": "KITCHEN_SCENE4",
+     "instruction": "put the black bowl in the bottom drawer of the cabinet",
+     "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+     "episode_range": [
+      1200,
+      1250
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 28,
+     "source": "libero_90",
+     "scene": "KITCHEN_SCENE5",
+     "instruction": "close the top drawer of the cabinet",
+     "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+     "episode_range": [
+      1400,
+      1450
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 29,
+     "source": "libero_90",
+     "scene": "KITCHEN_SCENE5",
+     "instruction": "put the black bowl in the top drawer of the cabinet",
+     "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+     "episode_range": [
+      1450,
+      1500
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 30,
+     "source": "libero_90",
+     "scene": "KITCHEN_SCENE5",
+     "instruction": "put the black bowl on the plate",
+     "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+     "episode_range": [
+      1500,
+      1550
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 33,
+     "source": "libero_90",
+     "scene": "KITCHEN_SCENE6",
+     "instruction": "close the microwave",
+     "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+     "episode_range": [
+      1650,
+      1700
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 35,
+     "source": "libero_90",
+     "scene": "KITCHEN_SCENE7",
+     "instruction": "open the microwave",
+     "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+     "episode_range": [
+      1750,
+      1800
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 36,
+     "source": "libero_90",
+     "scene": "KITCHEN_SCENE7",
+     "instruction": "put the white bowl on the plate",
+     "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+     "episode_range": [
+      1800,
+      1850
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 38,
+     "source": "libero_90",
+     "scene": "KITCHEN_SCENE8",
+     "instruction": "put the right moka pot on the stove",
+     "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+     "episode_range": [
+      1900,
+      1950
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 40,
+     "source": "libero_90",
+     "scene": "KITCHEN_SCENE9",
+     "instruction": "put the frying pan on the cabinet shelf",
+     "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+     "episode_range": [
+      2000,
+      2050
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 41,
+     "source": "libero_90",
+     "scene": "KITCHEN_SCENE9",
+     "instruction": "put the frying pan on top of the cabinet",
+     "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+     "episode_range": [
+      2050,
+      2100
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 92,
+     "source": "libero_10",
+     "scene": "KITCHEN_SCENE3",
+     "instruction": "turn on the stove and put the moka pot on it",
+     "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_10_image_task_2",
+     "episode_range": [
+      0,
+      50
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "libero100_index": 93,
+     "source": "libero_10",
+     "scene": "KITCHEN_SCENE4",
+     "instruction": "put the black bowl in the bottom drawer of the cabinet and close it",
+     "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_10_image_task_3",
+     "episode_range": [
+      0,
+      50
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    }
+   ],
+   "lifelong_stages": [
+    {
+     "stage": 1,
+     "tasks": [
+      {
+       "libero100_index": 3,
+       "source": "libero_90",
+       "scene": "KITCHEN_SCENE10",
+       "instruction": "put the butter at the back in the top drawer of the cabinet and close it",
+       "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+       "episode_range": [
+        150,
+        160
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      },
+      {
+       "libero100_index": 4,
+       "source": "libero_90",
+       "scene": "KITCHEN_SCENE10",
+       "instruction": "put the butter at the front in the top drawer of the cabinet and close it",
+       "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+       "episode_range": [
+        200,
+        210
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      },
+      {
+       "libero100_index": 5,
+       "source": "libero_90",
+       "scene": "KITCHEN_SCENE10",
+       "instruction": "put the chocolate pudding in the top drawer of the cabinet and close it",
+       "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+       "episode_range": [
+        250,
+        260
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      },
+      {
+       "libero100_index": 8,
+       "source": "libero_90",
+       "scene": "KITCHEN_SCENE1",
+       "instruction": "open the top drawer of the cabinet and put the bowl in it",
+       "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+       "episode_range": [
+        400,
+        410
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      },
+      {
+       "libero100_index": 9,
+       "source": "libero_90",
+       "scene": "KITCHEN_SCENE1",
+       "instruction": "put the black bowl on the plate",
+       "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+       "episode_range": [
+        450,
+        460
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      }
+     ]
+    },
+    {
+     "stage": 2,
+     "tasks": [
+      {
+       "libero100_index": 10,
+       "source": "libero_90",
+       "scene": "KITCHEN_SCENE1",
+       "instruction": "put the black bowl on top of the cabinet",
+       "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+       "episode_range": [
+        500,
+        510
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      },
+      {
+       "libero100_index": 14,
+       "source": "libero_90",
+       "scene": "KITCHEN_SCENE2",
+       "instruction": "put the middle black bowl on the plate",
+       "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+       "episode_range": [
+        700,
+        710
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      },
+      {
+       "libero100_index": 15,
+       "source": "libero_90",
+       "scene": "KITCHEN_SCENE2",
+       "instruction": "put the middle black bowl on top of the cabinet",
+       "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+       "episode_range": [
+        750,
+        760
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      },
+      {
+       "libero100_index": 16,
+       "source": "libero_90",
+       "scene": "KITCHEN_SCENE2",
+       "instruction": "stack the black bowl at the front on the black bowl in the middle",
+       "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+       "episode_range": [
+        800,
+        810
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      },
+      {
+       "libero100_index": 17,
+       "source": "libero_90",
+       "scene": "KITCHEN_SCENE2",
+       "instruction": "stack the middle black bowl on the back black bowl",
+       "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+       "episode_range": [
+        850,
+        860
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      }
+     ]
+    },
+    {
+     "stage": 3,
+     "tasks": [
+      {
+       "libero100_index": 21,
+       "source": "libero_90",
+       "scene": "KITCHEN_SCENE3",
+       "instruction": "turn on the stove and put the frying pan on it",
+       "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+       "episode_range": [
+        1050,
+        1060
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      },
+      {
+       "libero100_index": 25,
+       "source": "libero_90",
+       "scene": "KITCHEN_SCENE4",
+       "instruction": "put the black bowl on top of the cabinet",
+       "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+       "episode_range": [
+        1250,
+        1260
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      },
+      {
+       "libero100_index": 26,
+       "source": "libero_90",
+       "scene": "KITCHEN_SCENE4",
+       "instruction": "put the wine bottle in the bottom drawer of the cabinet",
+       "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+       "episode_range": [
+        1300,
+        1310
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      },
+      {
+       "libero100_index": 27,
+       "source": "libero_90",
+       "scene": "KITCHEN_SCENE4",
+       "instruction": "put the wine bottle on the wine rack",
+       "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+       "episode_range": [
+        1350,
+        1360
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      },
+      {
+       "libero100_index": 31,
+       "source": "libero_90",
+       "scene": "KITCHEN_SCENE5",
+       "instruction": "put the black bowl on top of the cabinet",
+       "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+       "episode_range": [
+        1550,
+        1560
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      }
+     ]
+    },
+    {
+     "stage": 4,
+     "tasks": [
+      {
+       "libero100_index": 32,
+       "source": "libero_90",
+       "scene": "KITCHEN_SCENE5",
+       "instruction": "put the ketchup in the top drawer of the cabinet",
+       "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+       "episode_range": [
+        1600,
+        1610
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      },
+      {
+       "libero100_index": 34,
+       "source": "libero_90",
+       "scene": "KITCHEN_SCENE6",
+       "instruction": "put the yellow and white mug to the front of the white mug",
+       "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+       "episode_range": [
+        1700,
+        1710
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      },
+      {
+       "libero100_index": 37,
+       "source": "libero_90",
+       "scene": "KITCHEN_SCENE7",
+       "instruction": "put the white bowl to the right of the plate",
+       "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+       "episode_range": [
+        1850,
+        1860
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      },
+      {
+       "libero100_index": 39,
+       "source": "libero_90",
+       "scene": "KITCHEN_SCENE8",
+       "instruction": "turn off the stove",
+       "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+       "episode_range": [
+        1950,
+        1960
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      },
+      {
+       "libero100_index": 42,
+       "source": "libero_90",
+       "scene": "KITCHEN_SCENE9",
+       "instruction": "put the frying pan under the cabinet shelf",
+       "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+       "episode_range": [
+        2100,
+        2110
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      }
+     ]
+    },
+    {
+     "stage": 5,
+     "tasks": [
+      {
+       "libero100_index": 43,
+       "source": "libero_90",
+       "scene": "KITCHEN_SCENE9",
+       "instruction": "put the white bowl on top of the cabinet",
+       "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+       "episode_range": [
+        2150,
+        2160
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      },
+      {
+       "libero100_index": 44,
+       "source": "libero_90",
+       "scene": "KITCHEN_SCENE9",
+       "instruction": "turn on the stove",
+       "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+       "episode_range": [
+        2200,
+        2210
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      },
+      {
+       "libero100_index": 45,
+       "source": "libero_90",
+       "scene": "KITCHEN_SCENE9",
+       "instruction": "turn on the stove and put the frying pan on it",
+       "dataset": "/home/sa090180/Datasets/lerobot/yzembodied_libero_90_dataset",
+       "episode_range": [
+        2250,
+        2260
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      },
+      {
+       "libero100_index": 98,
+       "source": "libero_10",
+       "scene": "KITCHEN_SCENE8",
+       "instruction": "put both moka pots on the stove",
+       "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_10_image_task_8",
+       "episode_range": [
+        0,
+        10
+       ],
+       "n_demos": 10,
+       "available_episodes": 46
+      },
+      {
+       "libero100_index": 99,
+       "source": "libero_10",
+       "scene": "KITCHEN_SCENE6",
+       "instruction": "put the yellow and white mug in the microwave and close it",
+       "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_10_image_task_9",
+       "episode_range": [
+        0,
+        10
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      }
+     ]
+    }
+   ]
+  },
+  "LIBERO-OBJECT": {
+   "n_tasks": 10,
+   "base_n_demos": 50,
+   "lifelong_n_demos": 10,
+   "base": [
+    {
+     "suite_index": 0,
+     "source": "libero_object",
+     "instruction": "pick up the alphabet soup and place it in the basket",
+     "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_object_image_task_0",
+     "episode_range": [
+      0,
+      50
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "suite_index": 1,
+     "source": "libero_object",
+     "instruction": "pick up the cream cheese and place it in the basket",
+     "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_object_image_task_1",
+     "episode_range": [
+      0,
+      50
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "suite_index": 2,
+     "source": "libero_object",
+     "instruction": "pick up the salad dressing and place it in the basket",
+     "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_object_image_task_2",
+     "episode_range": [
+      0,
+      50
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "suite_index": 3,
+     "source": "libero_object",
+     "instruction": "pick up the bbq sauce and place it in the basket",
+     "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_object_image_task_3",
+     "episode_range": [
+      0,
+      50
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "suite_index": 4,
+     "source": "libero_object",
+     "instruction": "pick up the ketchup and place it in the basket",
+     "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_object_image_task_4",
+     "episode_range": [
+      0,
+      50
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "suite_index": 5,
+     "source": "libero_object",
+     "instruction": "pick up the tomato sauce and place it in the basket",
+     "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_object_image_task_5",
+     "episode_range": [
+      0,
+      50
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    }
+   ],
+   "lifelong_stages": [
+    {
+     "stage": 1,
+     "tasks": [
+      {
+       "suite_index": 6,
+       "source": "libero_object",
+       "instruction": "pick up the butter and place it in the basket",
+       "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_object_image_task_6",
+       "episode_range": [
+        0,
+        10
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      }
+     ]
+    },
+    {
+     "stage": 2,
+     "tasks": [
+      {
+       "suite_index": 7,
+       "source": "libero_object",
+       "instruction": "pick up the milk and place it in the basket",
+       "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_object_image_task_7",
+       "episode_range": [
+        0,
+        10
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      }
+     ]
+    },
+    {
+     "stage": 3,
+     "tasks": [
+      {
+       "suite_index": 8,
+       "source": "libero_object",
+       "instruction": "pick up the chocolate pudding and place it in the basket",
+       "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_object_image_task_8",
+       "episode_range": [
+        0,
+        10
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      }
+     ]
+    },
+    {
+     "stage": 4,
+     "tasks": [
+      {
+       "suite_index": 9,
+       "source": "libero_object",
+       "instruction": "pick up the orange juice and place it in the basket",
+       "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_object_image_task_9",
+       "episode_range": [
+        0,
+        10
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      }
+     ]
+    }
+   ]
+  },
+  "LIBERO-GOAL": {
+   "n_tasks": 10,
+   "base_n_demos": 50,
+   "lifelong_n_demos": 10,
+   "base": [
+    {
+     "suite_index": 0,
+     "source": "libero_goal",
+     "instruction": "open the middle drawer of the cabinet",
+     "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_goal_image_task_0",
+     "episode_range": [
+      0,
+      50
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "suite_index": 1,
+     "source": "libero_goal",
+     "instruction": "put the bowl on the stove",
+     "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_goal_image_task_1",
+     "episode_range": [
+      0,
+      50
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "suite_index": 2,
+     "source": "libero_goal",
+     "instruction": "put the wine bottle on top of the cabinet",
+     "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_goal_image_task_2",
+     "episode_range": [
+      0,
+      50
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "suite_index": 3,
+     "source": "libero_goal",
+     "instruction": "open the top drawer and put the bowl inside",
+     "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_goal_image_task_3",
+     "episode_range": [
+      0,
+      50
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "suite_index": 4,
+     "source": "libero_goal",
+     "instruction": "put the bowl on top of the cabinet",
+     "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_goal_image_task_4",
+     "episode_range": [
+      0,
+      50
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    },
+    {
+     "suite_index": 5,
+     "source": "libero_goal",
+     "instruction": "push the plate to the front of the stove",
+     "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_goal_image_task_5",
+     "episode_range": [
+      0,
+      50
+     ],
+     "n_demos": 50,
+     "available_episodes": 50
+    }
+   ],
+   "lifelong_stages": [
+    {
+     "stage": 1,
+     "tasks": [
+      {
+       "suite_index": 6,
+       "source": "libero_goal",
+       "instruction": "put the cream cheese in the bowl",
+       "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_goal_image_task_6",
+       "episode_range": [
+        0,
+        10
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      }
+     ]
+    },
+    {
+     "stage": 2,
+     "tasks": [
+      {
+       "suite_index": 7,
+       "source": "libero_goal",
+       "instruction": "turn on the stove",
+       "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_goal_image_task_7",
+       "episode_range": [
+        0,
+        10
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      }
+     ]
+    },
+    {
+     "stage": 3,
+     "tasks": [
+      {
+       "suite_index": 8,
+       "source": "libero_goal",
+       "instruction": "put the bowl on the plate",
+       "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_goal_image_task_8",
+       "episode_range": [
+        0,
+        10
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      }
+     ]
+    },
+    {
+     "stage": 4,
+     "tasks": [
+      {
+       "suite_index": 9,
+       "source": "libero_goal",
+       "instruction": "put the wine bottle on the rack",
+       "dataset": "/home/sa090180/Datasets/lerobot/continuallearning/libero_goal_image_task_9",
+       "episode_range": [
+        0,
+        10
+       ],
+       "n_demos": 10,
+       "available_episodes": 50
+      }
+     ]
+    }
+   ]
+  }
+ }
+}
