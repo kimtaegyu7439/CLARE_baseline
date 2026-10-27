@@ -77,7 +77,8 @@ fi
 
 run_one() {
     local SUITE=$1 C=$2 GPU=$3
-    local LOG="logs/v5_${SUITE}_c${C}.log"
+    # ★ λ/β/warm 이 다른 런이 같은 GPU 서버에서 동시에 돌면 로그가 섞인다 — 태그로 분리
+    local LOG="logs/v5_${SUITE}_c${C}${LAM_TAG}${BETA_TAG}${WARM_TAG}.log"
     {
         echo "[$(date '+%F %T')] ════ V5 ${SUITE} c=${C} GPU${GPU} (${SPACE} 공간) ════"
         for SEED in ${SEEDS}; do
@@ -121,7 +122,7 @@ for j in ${JOBS}; do
         EVAL_SEED='${EVAL_SEED}' NW='${NW}' OMP_THREADS='${OMP_THREADS}' \
         ENTRY='${ENTRY}'; cd '${HERE}'; run_one '${SUITE}' '${C}' '${GPU}'" \
         > /dev/null 2>&1 &
-    echo "  ▶ GPU ${GPU}  ${SUITE}  c=${C}   로그 logs/v5_${SUITE}_c${C}.log"
+    echo "  ▶ GPU ${GPU}  ${SUITE}  c=${C} λ=${LAM} β=${BETA}   로그 logs/v5_${SUITE}_c${C}${LAM_TAG}${BETA_TAG}${WARM_TAG}.log"
     sleep 3
 done
 echo
