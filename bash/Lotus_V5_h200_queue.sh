@@ -26,6 +26,20 @@ source "${HERE}/bash/clare/env.sh"        # HOME 기준 Models/Datasets 경로
 PY=${PY:-$(command -v python || command -v python3)}
 "${PY}" -c "import torch, lerobot" 2>/dev/null \
     || { echo "✗ ${PY} 에 torch/lerobot 이 없다 — venv 를 켜고 다시 실행하라 (예: source ~/tether/bin/activate)"; exit 1; }
+# ★ H200 의 venv 에 깔린 lerobot 은 옛 lerobot_lsy 라 LIBERO_TASK_PREFIX_TO_BENCHMARK,
+#   resolve_delta_timestamps 가 없다. 레포 안 lerobot_lsy/src (서버1 설치본과 라이브러리
+#   모듈이 같다 — scripts/ 만 다르다) 를 PYTHONPATH 맨 앞에 두면 그쪽이 먼저 잡힌다.
+_chk='from lerobot.envs.configs import LIBERO_TASK_PREFIX_TO_BENCHMARK; from lerobot.datasets.factory import resolve_delta_timestamps'
+if ! "${PY}" -c "${_chk}" 2>/dev/null; then
+    if [ -d "${HERE}/lerobot_lsy/src/lerobot" ]; then
+        export PYTHONPATH="${HERE}/lerobot_lsy/src${PYTHONPATH:+:${PYTHONPATH}}"
+        "${PY}" -c "${_chk}" 2>/dev/null \
+            || { echo "✗ 레포의 lerobot_lsy 를 PYTHONPATH 에 넣어도 import 가 안 된다:"; "${PY}" -c "${_chk}" 2>&1 | tail -3; exit 1; }
+        echo "  lerobot: 설치본이 옛 버전이라 레포의 lerobot_lsy/src 를 PYTHONPATH 로 쓴다"
+    else
+        echo "✗ 설치된 lerobot 이 옛 버전이고 레포에 lerobot_lsy/ 도 없다"; exit 1
+    fi
+fi
 
 SUITE=${SUITE:-goal}
 C=${C:-0.1}
