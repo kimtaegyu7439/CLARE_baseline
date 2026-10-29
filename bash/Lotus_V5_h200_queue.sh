@@ -53,7 +53,9 @@ MEM_IDLE=${MEM_IDLE:-1500}
 IDLE_CHECKS=${IDLE_CHECKS:-5}
 SPACE=act; SCOPE=lifelong; SCOPE_TAG=LL; LIFELONG_K=${LIFELONG_K:-25}; WARM=0; REDUCE=mean
 STEPS=${STEPS:-10000}; N_EVAL=${N_EVAL:-20}; EVAL_SEED=${EVAL_SEED:-7}
-ENTRY=${ENTRY:-L2_V5.py}
+FAMILY=${FAMILY:-v5}          # v5 | v13  (v13: L2_V13.py, 태그 lotus_v13_b<β>_lam<λ>_..., c 없음)
+EPS_W=${EPS_W:-1e-3}
+if [ "${FAMILY}" = "v13" ]; then ENTRY=${ENTRY:-L2_V13.py}; else ENTRY=${ENTRY:-L2_V5.py}; fi
 # 런당 스레드: CPU 를 MAXJOBS 로 나눠 쓴다 (2..6)
 _per=$(( $(nproc) / MAXJOBS )); [ "${_per}" -lt 2 ] && _per=2; [ "${_per}" -gt 6 ] && _per=6
 NW=${NW:-${_per}}; OMP_THREADS=${OMP_THREADS:-${_per}}
@@ -63,6 +65,9 @@ QLOG="logs/h200_queue_${SUITE}.log"
 
 tag_of() {  # λ β seed
     local lt bt
+    if [ "${FAMILY}" = "v13" ]; then
+        echo "lotus_v13_b$2_lam$1_k${LIFELONG_K}_scope${SCOPE_TAG}_${SUITE}_seed$3"; return
+    fi
     lt=$([ "$1" = "1.0" ] && echo "" || echo "_lam$1")
     bt=$([ "$2" = "1.0" ] && echo "" || echo "_b$2")
     echo "lotus_v5${SPACE}_c${C}${lt}${bt}_k${LIFELONG_K}_scope${SCOPE_TAG}_${SUITE}_seed$3"
@@ -81,7 +86,7 @@ for SEED in ${SEEDS}; do for LAM in ${LAMS}; do for BETA in ${BETAS}; do
 done; done; done
 
 if [ -n "${DRY:-}" ]; then
-    echo "H200 큐  ${SUITE} c=${C}  λ∈{${LAMS}} β∈{${BETAS}} seed∈{${SEEDS}}  → ${#PLAN[@]} 런, ${MAXJOBS} 병렬, GPU${GPU}, 런당 NW=${NW} OMP=${OMP_THREADS}"
+    echo "H200 큐  ${FAMILY} ${SUITE} c=${C}  λ∈{${LAMS}} β∈{${BETAS}} seed∈{${SEEDS}}  → ${#PLAN[@]} 런, ${MAXJOBS} 병렬, GPU${GPU}, 런당 NW=${NW} OMP=${OMP_THREADS}"
     echo "python: ${PY}";  echo "GPU 메모리 지금: $(gpu_mem) MiB (유휴 기준 < ${MEM_IDLE})"
     for p in "${PLAN[@]}"; do
         IFS=: read -r L B S <<< "${p}"; t=$(tag_of "${L}" "${B}" "${S}")
@@ -92,7 +97,7 @@ if [ -n "${DRY:-}" ]; then
 fi
 
 {
-echo "[$(date '+%F %T')] ════ H200 큐 시작  ${SUITE} c=${C} λ∈{${LAMS}} β∈{${BETAS}} seed∈{${SEEDS}}  ${#PLAN[@]} 런 / ${MAXJOBS} 병렬 ════"
+echo "[$(date '+%F %T')] ════ H200 큐 시작  ${FAMILY} ${SUITE} c=${C} λ∈{${LAMS}} β∈{${BETAS}} seed∈{${SEEDS}}  ${#PLAN[@]} 런 / ${MAXJOBS} 병렬 ════"
 echo "  python ${PY}   NW=${NW} OMP=${OMP_THREADS}"
 
 # 1) 지금 돌고 있는 작업이 끝날 때까지
@@ -116,9 +121,12 @@ if [ "${WAIT}" = "1" ]; then
 fi
 
 # 2) 리포트 루프 (읽기 전용, 5 분마다 results/LOTUS_MAR_sweep.txt)
-REPORT=LOTUS_MAR_sweep_report.py INTERVAL=300 bash bash/report_loop.sh start 2>&1 | head -1
+FAMILY="${FAMILY}" REPORT=LOTUS_MAR_sweep_report.py INTERVAL=300 bash bash/report_loop.sh start 2>&1 | head -1
 
 # 3) 큐
+#   v5 : --anchor_c c --anchor_reduce mean --anchor_warmup 0     v13: --eps_w ε
+if [ "${FAMILY}" = "v13" ]; then FAM_ARGS="--eps_w ${EPS_W}"
+else FAM_ARGS="--anchor_c ${C} --anchor_reduce ${REDUCE} --anchor_warmup ${WARM}"; fi
 run_one() {   # λ β seed
     local TAG; TAG=$(tag_of "$1" "$2" "$3")
     mkdir -p "results/${TAG}"
@@ -127,9 +135,9 @@ run_one() {   # λ β seed
     OMP_NUM_THREADS="${OMP_THREADS}" MKL_NUM_THREADS="${OMP_THREADS}" \
     OPENBLAS_NUM_THREADS="${OMP_THREADS}" NUMEXPR_NUM_THREADS="${OMP_THREADS}" \
     "${PY}" -u "${ENTRY}" --setting lotus \
-        --anchor_c "${C}" --dir_space "${SPACE}" --anchor_reduce "${REDUCE}" \
+        ${FAM_ARGS} --dir_space "${SPACE}" \
         --lambda_level "$1" --lifelong_k "${LIFELONG_K}" \
-        --anchor_scope "${SCOPE}" --anchor_warmup "${WARM}" --beta "$2" \
+        --anchor_scope "${SCOPE}" --beta "$2" \
         --suite "${SUITE}" --steps "${STEPS}" --sampler_mode hard_linear \
         --skip_base_eval --seed "$3" --eval_seed "${EVAL_SEED}" \
         --eval_episodes "${N_EVAL}" --eval_batch_size "${N_EVAL}" \
