@@ -265,15 +265,19 @@ def main() -> None:
                 fmt(m["NBT"], True), fmt(m["AUC"]), cells, state))
         g = [(s, m) for s, m in data.get(suite, []) if m["done"]]
         if g:
-            cols = []
+            # 평균과 ± 를 두 줄로 나눈다. "78.8 ± 4.5" 는 10자라 9칸 열에
+            # 안 들어가 셀끼리 붙어 버린다 — 각 줄은 위 헤더 열에 그대로 맞는다.
+            mus, sds = [], []
             for key in ("AvgSR", "FWT", "NBT", "AUC"):
                 vals = [m[key] for _, m in g if m[key] is not None]
                 mu = st.mean(vals)
                 sg = "+" if key == "NBT" and mu >= 0 else ""
-                cols.append((f"{sg}{mu:.1f} ± {st.stdev(vals):.1f}" if len(vals) > 1
-                             else f"{sg}{mu:.1f}").rjust(9))
-            add("  {:>6}".format("평균") + "".join(cols)
+                mus.append(f"{sg}{mu:.1f}".rjust(9))
+                sds.append((f"{st.stdev(vals):.1f}" if len(vals) > 1 else "-").rjust(9))
+            add("  " + "평균".rjust(4) + "".join(mus)   # 전각 2자 = 표시 폭 4
                 + "{:>9}   완주한 시드만".format("n=" + str(len(g))))
+            add("  {:>6}".format("±") + "".join(sds)
+                + "{:>9}   시드 간 표본표준편차(ddof=1)".format(""))
         add("")
 
     # ── SR 행렬 ─────────────────────────────────────────────────────────────

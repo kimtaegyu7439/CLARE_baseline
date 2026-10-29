@@ -216,9 +216,13 @@ def main() -> None:
                     help="비교할 λ_lvl 목록. λ 는 앵커 손실 앞의 계수다")
     ap.add_argument("--warms", default=os.environ.get("WARMS", "0 0.25"),
                     help="비교할 warmup 비율 목록. 0 = 없음(V5), 0.25 = L2_V5_warmup")
-    ap.add_argument("--v13_betas", default=os.environ.get("V13_BETAS", "3.0 4.0"),
+    ap.add_argument("--v13_betas", default=os.environ.get("V13_BETAS", "1.0 2.0 3.0 4.0"),
                     help="V13(dea W_e 를 크기+방향에 공유) 런의 β 목록. 빈 문자열이면 절 생략")
     ap.add_argument("--v13_lam", default=os.environ.get("V13_LAM", "3.0"))
+    # ★ β 와 λ 를 같이 바꾸는 팔. "β:λ" 목록. --v13_betas x --v13_lam 조합에 더해진다.
+    #   goal 에서 FWT 가 병목이라 앵커를 약하게 가는 두 팔(β 반감 / λ 감소)을 기본에 둔다.
+    ap.add_argument("--v13_arms", default=os.environ.get("V13_ARMS", "0.5:3.0 1.0:2.0 1.5:2.5"),
+                    help="V13 (β:λ) 조합 목록. --v13_betas 의 β 들은 --v13_lam 과 짝지어 앞에 붙는다")
     ap.add_argument("--out", default=os.environ.get("OUT", ""),
                     help="출력 파일명 (results/ 아래). 비우면 LOTUS_act_V5_SR.txt")
     ap.add_argument("--k", type=int, default=int(os.environ.get("LIFELONG_K", "25")))
@@ -233,6 +237,11 @@ def main() -> None:
     lams = [float(x) for x in a.lams.split()]
     warms = [float(x) for x in a.warms.split()]
     v13_betas = [float(x) for x in a.v13_betas.split()] if a.v13_betas.strip() else []
+    v13_arms: list[tuple[float, float]] = [(b, float(a.v13_lam)) for b in v13_betas]
+    for tok in a.v13_arms.split():
+        b, l = tok.split(":")
+        if (float(b), float(l)) not in v13_arms:
+            v13_arms.append((float(b), float(l)))
     out_path = (RES / a.out) if a.out else OUT
     seeds = [int(x) for x in a.seeds.split()]
 
@@ -349,27 +358,28 @@ def main() -> None:
     add("")
 
     # ── V13: dea 의 방향 가중 W_e 를 크기 항에도 곱한 팔 ─────────────────────
-    def v13_dir(beta, suite, sd):
+    def v13_dir(beta, lam, suite, sd):
         for b in (f"{beta:.1f}", f"{beta:g}"):
-            d = RES / f"lotus_v13_b{b}_lam{a.v13_lam}_k{a.k}_scope{SCOPE_TAG}_{suite}_seed{sd}"
-            if d.is_dir():
-                return d
-        return RES / f"lotus_v13_b{beta:.1f}_lam{a.v13_lam}_k{a.k}_scope{SCOPE_TAG}_{suite}_seed{sd}"
+            for l in (f"{lam:.1f}", f"{lam:g}"):
+                d = RES / f"lotus_v13_b{b}_lam{l}_k{a.k}_scope{SCOPE_TAG}_{suite}_seed{sd}"
+                if d.is_dir():
+                    return d
+        return RES / f"lotus_v13_b{beta:.1f}_lam{lam:.1f}_k{a.k}_scope{SCOPE_TAG}_{suite}_seed{sd}"
 
-    if v13_betas:
+    if v13_arms:
         add("=" * W)
-        add(f"V13 — dea 의 방향 가중 W_e 를 **크기 항에도** 곱한다  (λ_lvl={a.v13_lam})")
+        add("V13 — dea 의 방향 가중 W_e 를 **크기 항에도** 곱한다  (β = 방향 항 배율, λ = 앵커 전체 세기)")
         add("=" * W)
         add("  m 계수 w^e_j,  e 계수 β·w^e_j.  하나의 W 로 두 항을 같은 태스크에 집중.")
         add("  V10(크기는 w^m) 과 한 줄 차이. 1/N 없음(Σw=1). 무효 칸은 크기 감독도 0.")
         add("")
-        add(f"  {'β':>5}{'suite':>9}{'seed':>6}{'AvgSR':>9}{'FWT↑':>9}{'NBT↓':>9}"
+        add(f"  {'β':>5}{'λ':>5}{'suite':>9}{'seed':>6}{'AvgSR':>9}{'FWT↑':>9}{'NBT↓':>9}"
             f"{'AUC↑':>9}{'칸':>8}   상태")
         v13_rows: dict = {}
-        for beta in v13_betas:
+        for beta, lam in v13_arms:
             for suite in SUITES:
                 for sd in seeds:
-                    d = v13_dir(beta, suite, sd)
+                    d = v13_dir(beta, lam, suite, sd)
                     if not d.is_dir():
                         continue
                     R, la, src = read_R(d)
@@ -383,18 +393,18 @@ def main() -> None:
                     else:
                         note = "폴더만 있음"
                     if m is None:
-                        add(f"  {beta:>5g}{suite:>9}{sd:>6}" + f"{'-':>9}" * 4 + f"{'-':>8}   {note}")
+                        add(f"  {beta:>5g}{lam:>5g}{suite:>9}{sd:>6}" + f"{'-':>9}" * 4 + f"{'-':>8}   {note}")
                         continue
-                    v13_rows.setdefault((beta, suite), []).append((sd, m))
+                    v13_rows.setdefault((beta, lam, suite), []).append((sd, m))
                     star = "" if m["done"] else "*"
-                    add("  {:>5g}{:>9}{:>6}{:>9}{:>9}{:>9}{:>9}{:>8}   {}".format(
-                        beta, suite, sd, fmt(m["AvgSR"]) + star, fmt(m["FWT"]),
+                    add("  {:>5g}{:>5g}{:>9}{:>6}{:>9}{:>9}{:>9}{:>9}{:>8}   {}".format(
+                        beta, lam, suite, sd, fmt(m["AvgSR"]) + star, fmt(m["FWT"]),
                         fmt(m["NBT"], True), fmt(m["AUC"]),
                         "{}/{}".format(m["have"], m["need"]), "완주" if m["done"] else note))
         add("")
         add("  집계 (완주한 시드만, ± ddof=1)")
-        add(f"    {'β':>5}{'suite':>9}{'n':>3}{'시드':>14}{'AvgSR':>15}{'FWT↑':>15}{'NBT↓':>15}{'AUC↑':>15}")
-        for (beta, suite), g in v13_rows.items():
+        add(f"    {'β':>5}{'λ':>5}{'suite':>9}{'n':>3}{'시드':>14}{'AvgSR':>15}{'FWT↑':>15}{'NBT↓':>15}{'AUC↑':>15}")
+        for (beta, lam, suite), g in v13_rows.items():
             g = [(sd, m) for sd, m in g if m["done"]]
             if not g:
                 continue
@@ -406,33 +416,135 @@ def main() -> None:
                 mu = st.mean(vals); sign = "+" if key == "NBT" and mu >= 0 else ""
                 cols.append((f"{sign}{mu:.1f} ± {st.stdev(vals):.1f}" if len(vals) > 1
                              else f"{sign}{mu:.1f}").rjust(15))
-            add(f"    {beta:>5g}{suite:>9}{len(g):>3}" + ",".join(str(s) for s, _ in g).rjust(14)
+            add(f"    {beta:>5g}{lam:>5g}{suite:>9}{len(g):>3}" + ",".join(str(s) for s, _ in g).rjust(14)
                 + "".join(cols))
         add("")
-        for beta in v13_betas:
+
+        # ── 재현 대조: 같은 조건·같은 seed 를 다시 돌린 _rerun<N> 폴더 ──────────
+        #   bash/Lotus_V13_rerun.sh 가 만든다. 위 집계에는 **넣지 않는다** — 원본 기록은
+        #   그대로 두고, 같은 seed 를 다시 돌렸을 때 얼마나 흔들리는지만 따로 본다.
+        #   (stage 1 은 앵커가 꺼져 있어 네 구성이 같은 절차인데 t6 가 55~80 으로
+        #    흔들렸다. 그 폭이 GPU 비결정성인지 확인하는 실험이다.)
+        def reruns_of(d):
+            return sorted(RES.glob(d.name + "_rerun*"), key=lambda p: p.name)
+
+        def run_state(d, m):
+            if m is not None and m["done"]:
+                return "완주"
+            pr = progress(d)
+            if not pr:
+                return "폴더만 있음"
+            s = ("시작 중" if pr["step"] == -2 else "코드북 빌드 중" if pr["step"] == -1
+                 else f"학습 stage{pr['stage']} {pr['step']}/10000")
+            return s + (f" ⚠{pr['age_h']:.1f}h 정지?" if pr["age_h"] > 1.0 else "")
+
+        rerun_pairs = []
+        for beta, lam in v13_arms:
             for suite in SUITES:
                 for sd in seeds:
-                    d = v13_dir(beta, suite, sd)
+                    d0 = v13_dir(beta, lam, suite, sd)
+                    if d0.is_dir() and reruns_of(d0):
+                        rerun_pairs.append((beta, lam, suite, sd, d0))
+        if rerun_pairs:
+            add("  재현 대조 (같은 조건·같은 seed 를 다시 돌린 것. 위 집계에는 들어가지 않는다)")
+            add(f"  {'β':>5}{'λ':>5}{'suite':>9}{'seed':>6}{'런':>8}{'AvgSR':>9}{'FWT↑':>9}{'NBT↓':>9}"
+                f"{'AUC↑':>9}{'칸':>8}   상태")
+            for beta, lam, suite, sd, d0 in rerun_pairs:
+                rows = [("원본", d0)] + [(p.name.rsplit("_", 1)[1], p) for p in reruns_of(d0)]
+                ms = []
+                for label, d in rows:
+                    R, la, _ = read_R(d)
+                    m = lifelong(R, la)
+                    ms.append(m)
+                    if m is None:
+                        add(f"  {beta:>5g}{lam:>5g}{suite:>9}{sd:>6}{label:>8}" + f"{'-':>9}" * 4
+                            + f"{'-':>8}   {run_state(d, None)}")
+                        continue
+                    star = "" if m["done"] else "*"
+                    add("  {:>5g}{:>5g}{:>9}{:>6}{:>8}{:>9}{:>9}{:>9}{:>9}{:>8}   {}".format(
+                        beta, lam, suite, sd, label, fmt(m["AvgSR"]) + star, fmt(m["FWT"]),
+                        fmt(m["NBT"], True), fmt(m["AUC"]),
+                        "{}/{}".format(m["have"], m["need"]), run_state(d, m)))
+                done = [m for m in ms if m is not None and m["done"]]
+                if len(done) >= 2:
+                    cols = []
+                    for key in ("AvgSR", "FWT", "NBT", "AUC"):
+                        vals = [m[key] for m in done if m[key] is not None]
+                        cols.append((f"{max(vals) - min(vals):.1f}" if len(vals) > 1 else "-").rjust(9))
+                    add(f"  {'':>5}{'':>5}{'':>9}{'':>6}{'최대차':>8}" + "".join(cols)
+                        + f"{'':>8}   완주한 런 {len(done)}개 사이의 max−min")
+            add("")
+
+            # 재현 집계: 재현된 seed 는 **가장 최근 완주한 rerun** 값으로 바꾸고, 재현이
+            # 없는 seed 는 원본을 그대로 써서 시드 평균 ± 표준편차를 낸다. 원본 집계와
+            # 나란히 두어 "seed 하나를 다시 돌리면 3-시드 평균이 얼마나 움직이나" 를 본다.
+            def agg_cols(ms):
+                cols = []
+                for key in ("AvgSR", "FWT", "NBT", "AUC"):
+                    vals = [m[key] for m in ms if m[key] is not None]
+                    if not vals:
+                        cols.append("-".rjust(15)); continue
+                    mu = st.mean(vals); sign = "+" if key == "NBT" and mu >= 0 else ""
+                    cols.append((f"{sign}{mu:.1f} ± {st.stdev(vals):.1f}" if len(vals) > 1
+                                 else f"{sign}{mu:.1f}").rjust(15))
+                return "".join(cols)
+
+            add("  재현 집계 (재현된 seed 는 최근 완주한 rerun 값, 나머지 seed 는 원본. ± ddof=1)")
+            add(f"    {'β':>5}{'λ':>5}{'suite':>9}{'n':>3}{'시드':>18}{'AvgSR':>15}{'FWT↑':>15}{'NBT↓':>15}{'AUC↑':>15}")
+            for beta, lam, suite in sorted({(b, l, s) for b, l, s, _, _ in rerun_pairs}):
+                orig, repl, labels = [], [], []
+                for sd in seeds:
+                    d0 = v13_dir(beta, lam, suite, sd)
+                    if not d0.is_dir():
+                        continue
+                    R, la, _ = read_R(d0)
+                    m0 = lifelong(R, la)
+                    if m0 is None or not m0["done"]:
+                        continue
+                    orig.append(m0)
+                    pick, tag = m0, str(sd)
+                    for p in reversed(reruns_of(d0)):
+                        R, la, _ = read_R(p)
+                        mr = lifelong(R, la)
+                        if mr is not None and mr["done"]:
+                            pick, tag = mr, f"{sd}({p.name.rsplit('_', 1)[1]})"
+                            break
+                    repl.append(pick); labels.append(tag)
+                if len(orig) < 2:
+                    continue
+                add(f"    {beta:>5g}{lam:>5g}{suite:>9}{len(orig):>3}" + "원본".rjust(16) + agg_cols(orig))
+                add(f"    {beta:>5g}{lam:>5g}{suite:>9}{len(repl):>3}" + ",".join(labels).rjust(18) + agg_cols(repl))
+            add("")
+
+        def v13_matrix(head, d):
+            R, la, src = read_R(d)
+            add("-" * W)
+            if not R:
+                add(f"{head}   ({d.name})   — SR 없음"); add("-" * W); add(""); return
+            m = lifelong(R, la)
+            tail = "   {}/{}칸".format(m["have"], m["need"]) if m else ""
+            add(f"{head}   ({d.name})   출처 {src}" + tail)
+            add("-" * W)
+            nt = max(len(r) for r in R)
+            add(f"{'stage':<7}" + "".join(f"{'t'+str(t):>5}" for t in range(nt)))
+            for k in range(len(R)):
+                add(f"{k:<7}" + "".join((f"{R[k][t]:5.0f}" if t < len(R[k]) and R[k][t] is not None
+                                          else f"{'':>5}") for t in range(nt)))
+            if m:
+                add(f"  지표  AvgSR {fmt(m['AvgSR'])}   FWT↑ {fmt(m['FWT'])}   "
+                    f"NBT↓ {fmt(m['NBT'], True)}   AUC↑ {fmt(m['AUC'])}"
+                    + ("" if m["done"] else "   (진행 중)"))
+            add("")
+
+        for beta, lam in v13_arms:
+            for suite in SUITES:
+                for sd in seeds:
+                    d = v13_dir(beta, lam, suite, sd)
                     if not d.is_dir():
                         continue
-                    R, la, src = read_R(d)
-                    add("-" * W)
-                    if not R:
-                        add(f"V13 β={beta:g} {suite} seed{sd}   ({d.name})   — SR 없음"); add("-" * W); add(""); continue
-                    m = lifelong(R, la)
-                    tail = "   {}/{}칸".format(m["have"], m["need"]) if m else ""
-                    add(f"V13 β={beta:g} {suite} seed{sd}   ({d.name})   출처 {src}" + tail)
-                    add("-" * W)
-                    nt = max(len(r) for r in R)
-                    add(f"{'stage':<7}" + "".join(f"{'t'+str(t):>5}" for t in range(nt)))
-                    for k in range(len(R)):
-                        add(f"{k:<7}" + "".join((f"{R[k][t]:5.0f}" if t < len(R[k]) and R[k][t] is not None
-                                                  else f"{'':>5}") for t in range(nt)))
-                    if m:
-                        add(f"  지표  AvgSR {fmt(m['AvgSR'])}   FWT↑ {fmt(m['FWT'])}   "
-                            f"NBT↓ {fmt(m['NBT'], True)}   AUC↑ {fmt(m['AUC'])}"
-                            + ("" if m["done"] else "   (진행 중)"))
-                    add("")
+                    v13_matrix(f"V13 β={beta:g} λ={lam:g} {suite} seed{sd}", d)
+                    for p in reruns_of(d):
+                        v13_matrix(f"V13 β={beta:g} λ={lam:g} {suite} seed{sd} 재현({p.name.rsplit('_', 1)[1]})", p)
 
     # ── SR 행렬 ─────────────────────────────────────────────────────────────
     add("=" * W)
