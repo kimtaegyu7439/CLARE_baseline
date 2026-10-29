@@ -8,9 +8,10 @@
 #   nohup bash bash/Lotus_V13_h200_queue.sh > logs/h200_v13_queue.out 2>&1 &
 #
 #   SUITE=object   기본. goal 도 된다
-#   BETAS="3.0 4.0" LAMS="3.0 4.0" SEEDS="7 42 1000"   조합 (기본 2×2×3 = 12 런)
-#     ★ object 는 지금까지 β=1,2 (λ=3) 에서 NBT 가 +2.9 / +1.8 로 **망각**이 병목이라
-#       앵커를 세게 가는 격자를 기본으로 둔다 (goal 과 반대 방향).
+#   BETAS="1.0 1.5 2.0" LAMS="1.5 2.0" SEEDS="7 42 1000"   조합 (기본 3×2×3 = 18 런)
+#     ★ 기본 격자는 다른 서버와 겹치지 않게 골랐다. object 는 서버1(λ=3, β=1,2) 과
+#       4090_2/서버1 GPU (λ 0.7~1.2, β 1~2) 가 이미 돌고 있어, 그 사이 λ∈{1.5, 2} 를 메운다.
+#       다른 조합이 필요하면 BETAS/LAMS 를 넘기면 된다. 리포트는 폴더명을 파싱하므로 격자에 무관하다.
 #   MAXJOBS=4  병렬 수 (런당 VRAM ~5G. CPU 가 병목이라 nproc/MAXJOBS 로 스레드를 나눈다)
 #   WAIT=0     GPU 가 비기를 기다리지 않고 바로 시작
 #   WAIT_PID=<pid>  그 프로세스가 끝난 뒤 시작
@@ -36,8 +37,8 @@ if ! "${PY}" -c "${_chk}" 2>/dev/null; then
     fi
 fi
 SUITE=${SUITE:-object}
-BETAS=${BETAS:-"3.0 4.0"}
-LAMS=${LAMS:-"3.0 4.0"}
+BETAS=${BETAS:-"1.0 1.5 2.0"}
+LAMS=${LAMS:-"1.5 2.0"}
 SEEDS=${SEEDS:-"7 42 1000"}
 MAXJOBS=${MAXJOBS:-4}
 GPU=${GPU:-0}
@@ -69,11 +70,10 @@ train_done() {
 already_running() { pgrep -f "${ENTRY} .*--out results/$1( |$)" >/dev/null 2>&1; }
 gpu_mem() { nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits -i "${GPU}" 2>/dev/null | head -1 | tr -d ' '; }
 
-PLAN=(); ARMS=""
+PLAN=()
 for SEED in ${SEEDS}; do for LAM in ${LAMS}; do for BETA in ${BETAS}; do
     PLAN+=("${BETA}:${LAM}:${SEED}")
 done; done; done
-for LAM in ${LAMS}; do for BETA in ${BETAS}; do ARMS="${ARMS} ${BETA}:${LAM}"; done; done
 
 if [ -n "${DRY:-}" ]; then
     echo "H200 V13 큐  ${SUITE}  β∈{${BETAS}} λ∈{${LAMS}} seed∈{${SEEDS}}  → ${#PLAN[@]} 런, ${MAXJOBS} 병렬, GPU${GPU}, 런당 NW=${NW} OMP=${OMP_THREADS}"
@@ -107,9 +107,10 @@ if [ "${WAIT}" = "1" ]; then
     echo "[$(date '+%F %T')] GPU 비었다 (${m} MiB) — 시작"
 fi
 
-# 리포트 루프 (읽기 전용, 5 분마다 results/LOTUS_act_V5_SR.txt 의 V13 절을 갱신)
-#   V13_ARMS 로 이 큐의 (β:λ) 조합을 리포트에 넘긴다 — 루프 프로세스가 환경을 물려받는다.
-V13_ARMS="${ARMS# }" REPORT=LOTUS_act_V5_report.py INTERVAL=300 bash bash/report_loop.sh start 2>&1 | head -1
+# 리포트 루프 (읽기 전용, 5 분마다 results/LOTUS_V13_sweep.txt)
+#   FAMILY=v13 LOTUS_MAR_sweep_report.py 는 lotus_v13_* 폴더명을 파싱해 (λ,β)×시드를 집계한다
+#   (4090_2 동기화 루프와 같은 리포트). 루프 프로세스가 FAMILY 를 물려받는다.
+FAMILY=v13 REPORT=LOTUS_MAR_sweep_report.py INTERVAL=300 bash bash/report_loop.sh start 2>&1 | head -1
 
 run_one() {   # β λ seed
     local TAG; TAG=$(tag_of "$1" "$2" "$3")
@@ -141,4 +142,4 @@ done
 wait
 echo "[$(date '+%F %T')] ════ H200 V13 큐 완료 ════"
 } >> "${QLOG}" 2>&1
-echo "큐를 띄웠다 — 진행: tail -f ${QLOG}   결과: results/LOTUS_act_V5_SR.txt (V13 절)"
+echo "큐를 띄웠다 — 진행: tail -f ${QLOG}   결과: results/LOTUS_V13_sweep.txt"
