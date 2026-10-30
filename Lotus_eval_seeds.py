@@ -6,8 +6,8 @@ init state 선택에 쓰지 않고(프로세스 전역 카운터), 정책의 flo
 여기서는 평가 시드 s 가 두 가지를 **결정**하게 한다.
   1. init state 묶음: 칸마다 카운터를 (s*20) % 50 으로 되돌린다 → 그 칸은 init state
      offset..offset+19 (mod 50) 를 쓴다. s 가 같으면 어떤 순서로 돌려도 같은 배치다.
-  2. 정책 노이즈: 칸(stage k, task t)마다 torch.Generator(s*1000 + k*10 + t) 를
-     policy.eval_generator 로 꽂는다 (modeling_dit_flow_mt.select_action 이 읽는다).
+  2. 정책 노이즈: task t 마다 torch.Generator(s*1000 + t) 를 policy(.dit_flow).eval_generator 로
+     꽂는다 — 같은 task 는 stage 가 달라도 같은 노이즈 (modeling_dit_flow_mt.select_action 이 읽는다).
   + cudnn.benchmark 끄고 deterministic 알고리즘(warn_only) → 같은 GPU 에서는 재실행이 일치해야 한다.
 
     python Lotus_eval_seeds.py --run results/<run> --seeds "0 1 2 3" [--repeat 0]
@@ -40,7 +40,8 @@ def eval_cell(policy, cfg, handle, args, seed, k, t):
     from lerobot.envs.factory import make_env
     from lerobot.scripts.eval import eval_policy
     GLEnv.init_state_couter = (seed * 20) % 50
-    g = torch.Generator(device=args.device).manual_seed(seed * 1000 + k * 10 + t)
+    # task 기준으로 시드를 고정한다 — 같은 task 는 어느 stage 에서 재도 같은 노이즈 (stage 간 차이=NBT 의 분산을 줄인다)
+    g = torch.Generator(device=args.device).manual_seed(seed * 1000 + t)
     policy.eval_generator = g
     if hasattr(policy, "dit_flow"):
         policy.dit_flow.eval_generator = g       # select_action/conditional_sample 은 dit_flow 안에 있다
