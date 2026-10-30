@@ -1225,7 +1225,10 @@ class DiTFlowModel(nn.Module):
 
         # run sampling
         # 노이즈에서 시작해 num_inference_steps(=100)번 적분하여 (B, 16, 7)을 만든다.
-        actions = self.conditional_sample(batch_size, global_cond=global_cond)
+        # eval_generator 속성이 있으면 그 Generator 로 초기 노이즈를 뽑는다 — 평가 재현용
+        # (Lotus_eval_seeds.py 가 칸마다 시드를 박아 둔다). 없으면 전역 RNG (기존과 같다).
+        actions = self.conditional_sample(batch_size, global_cond=global_cond,
+                                          generator=getattr(self, "eval_generator", None))
 
         # Extract `n_action_steps` steps worth of actions (from the current observation).
         # 16개 중 8개만 취하고 나머지는 버린다(temporal ensemble 아님, 그냥 폐기).
