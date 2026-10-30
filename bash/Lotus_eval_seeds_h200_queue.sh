@@ -3,7 +3,7 @@
 #   (venv 켠 상태에서)
 #   SEEDS="$(seq -s ' ' 8 27)" MAXJOBS=4 setsid nohup bash bash/Lotus_eval_seeds_h200_queue.sh > /dev/null 2>&1 &
 #   RUNS="..."   기본 세 런 (λ0.7 β2 object seed 7/42/1000)
-#   SEEDS        기본 8..27 (0..7 은 서버1/4090_2 에서 이미 쟀다)
+#   SEEDS        기본 8..107 (100개; 0..7 은 서버1/4090_2 에서 이미 쟀다). 런 3개 × 100 = 300 잡, 4병렬 ≈ 2.3일
 #   MAXJOBS      기본 4 (잡당 VRAM ~3G, CPU 가 병목)
 # 결과: results/<run>/eval_seeds/seed<N>.json + results/LOTUS_eval_seed_sweep.txt (한 줄/시드)
 set -uo pipefail
@@ -16,7 +16,7 @@ if ! "${PY}" -c "${_chk}" 2>/dev/null; then
     "${PY}" -c "${_chk}" 2>/dev/null || { echo "✗ lerobot import 실패"; exit 1; }
 fi
 RUNS=${RUNS:-"lotus_v13_b2.0_lam0.7_k25_scopeLL_object_seed7 lotus_v13_b2.0_lam0.7_k25_scopeLL_object_seed42 lotus_v13_b2.0_lam0.7_k25_scopeLL_object_seed1000"}
-SEEDS=${SEEDS:-"$(seq -s ' ' 8 27)"}
+SEEDS=${SEEDS:-"$(seq -s ' ' 8 107)"}
 MAXJOBS=${MAXJOBS:-4}; GPU=${GPU:-0}
 _per=$(( $(nproc) / MAXJOBS )); [ "${_per}" -lt 2 ] && _per=2; [ "${_per}" -gt 6 ] && _per=6
 mkdir -p logs; QLOG=logs/h200_eval_seeds_queue.log
