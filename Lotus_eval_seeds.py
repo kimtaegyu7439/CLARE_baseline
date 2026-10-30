@@ -40,7 +40,10 @@ def eval_cell(policy, cfg, handle, args, seed, k, t):
     from lerobot.envs.factory import make_env
     from lerobot.scripts.eval import eval_policy
     GLEnv.init_state_couter = (seed * 20) % 50
-    policy.eval_generator = torch.Generator(device=args.device).manual_seed(seed * 1000 + k * 10 + t)
+    g = torch.Generator(device=args.device).manual_seed(seed * 1000 + k * 10 + t)
+    policy.eval_generator = g
+    if hasattr(policy, "dit_flow"):
+        policy.dit_flow.eval_generator = g       # select_action/conditional_sample 은 dit_flow 안에 있다
     env_cfg = copy.deepcopy(cfg.env); env_cfg.task = handle
     env = make_env(env_cfg, n_envs=args.eval_batch_size, use_async_envs=False)
     try:
