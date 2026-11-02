@@ -1532,6 +1532,11 @@ def main() -> None:
                     extra += (f" anc_w={sum(diag['w_mean'])/len(diag['w_mean']):.2f}"
                               f"/{max(diag['w_max']):.1f}")
                     diag["w_mean"], diag["w_max"] = [], []
+                if diag.get("clip_s"):
+                    cs = diag["clip_s"]
+                    extra += (f" clip_s={sum(cs)/len(cs):.2f}"
+                              f"(clipped {sum(1 for v in cs if v < 1)}/{len(cs)})")
+                    diag["clip_s"] = []
                 if "sanity_ratio" in diag:
                     extra += f" sanity(ṽ_T≈â)={diag.pop('sanity_ratio'):.3f}"
                 logging.info(f"[LOTUS] stage{stage} step={it:6d} "

@@ -32,8 +32,9 @@ OUT = RES / "LOTUS_MAR_sweep.txt"
 PAT_V5 = re.compile(r"^lotus_v5(?P<space>act|vel)_c(?P<c>[0-9.]+)"
                     r"(?:_lam(?P<lam>[0-9.]+))?(?:_b(?P<beta>[0-9.]+))?(?:_warm(?P<warm>[0-9.]+))?"
                     r"_k(?P<k>\d+)_scope(?P<scope>LL|ALL)_(?P<suite>goal|object|50)_seed(?P<seed>\d+)$")
-# V13: lotus_v13_b<β>_lam<λ>_k<K>_scope<LL|ALL>_<suite>_seed<N>  (c, warm 없음)
-PAT_V13 = re.compile(r"^lotus_v13_b(?P<beta>[0-9.]+)_lam(?P<lam>[0-9.]+)"
+# V13: lotus_v13_b<β>_lam<λ>[_clip<c>]_k<K>_scope<LL|ALL>_<suite>_seed<N>
+#      (warm 없음. c 열에는 anchor_clip 상한을 넣는다 — 없으면 '-')
+PAT_V13 = re.compile(r"^lotus_v13_b(?P<beta>[0-9.]+)_lam(?P<lam>[0-9.]+)(?:_clip(?P<clip>[0-9.]+))?"
                      r"_k(?P<k>\d+)_scope(?P<scope>LL|ALL)_(?P<suite>goal|object|50)_seed(?P<seed>\d+)$")
 # FAMILY=v13 이면 V13 폴더를 모아 results/LOTUS_V13_sweep.txt 에 쓴다 (report_loop 와 같이 env 로 고른다)
 FAMILY = os.environ.get("FAMILY", "v5").lower()
@@ -57,7 +58,8 @@ def discover():
             continue
         g = m.groupdict()
         if FAMILY == "v13":
-            runs.append(dict(dir=d, suite=g["suite"], seed=int(g["seed"]), c=None,
+            runs.append(dict(dir=d, suite=g["suite"], seed=int(g["seed"]),
+                             c=float(g["clip"]) if g.get("clip") else None,
                              lam=float(g["lam"]), beta=float(g["beta"]), warm=None,
                              k=int(g["k"]), scope=g["scope"], space="act"))
             continue
@@ -188,6 +190,7 @@ def main() -> None:
         add("V13 앵커  L_j = w^e_j·m + β·w^e_j·e    (dea 의 W_e 를 크기 항에도, 1/N 없음, Σ_j w_j = 1)")
         add("  λ  앵커 손실 앞 계수 (L = L_FM + λ·L_anchor)     β  방향 항 배율")
         add("  태스크당 실효 계수 ≈ 크기 λ/N, 방향 λβ/N  (W_e ≈ 1/N 일 때)")
+        add("  c  = anchor_clip 상한 (anc=λ·mean_j L_j 가 c 를 넘으면 c 로 축소, '-' 면 없음)")
     else:
         add("V5 앵커   L_j = (1/N)[ m + β·e/(r_T²+c) ]")
         add("  λ  앵커 손실 앞 계수 (L = L_FM + λ·L_anchor)     β  방향 항 배율 (1 = 기존)")

@@ -40,6 +40,10 @@ V10 은 "크기 오차가 큰 태스크에 크기 예산을" 주지만, V13 은 
   한다. teacher forward 는 pass 1 결과를 재사용하고 student forward 만 2 배다.
 
 ★ 공간은 액션(--dir_space act) 기본. V7/V10 과 같다.
+
+★ --anchor_clip c (lotus): anc = λ·mean_j L_j 가 c 를 넘는 step 에서 배율 s = c/anc
+  를 곱해 실효 anchor loss 를 c 로 고정한다. 스테이지 초반(새 태스크 학습 중)
+  anc 가 튀어 FM 을 누르는 것을 막아 FWT 를 지키려는 것. 폴더 태그 _clip<c>.
 """
 from __future__ import annotations
 
@@ -174,6 +178,7 @@ def _lotus_anchor_loss(opt):
         n = x_t.shape[0]
         tcol = t[:, None, None]
         beta, eps_w = float(opt.beta), float(opt.eps_w)
+        clip = float(getattr(opt, "anchor_clip", 0.0) or 0.0)
         P = opt.pose_dims if opt.pose_dims else LC.POSE_DIMS
         sampler = getattr(args, "sampler_mode", "hard_linear") if args else "hard_linear"
 
@@ -210,14 +215,32 @@ def _lotus_anchor_loss(opt):
                 return to_action(v_s, q["x_j"], t), to_action(q["v_t"], q["x_j"], t)
             return v_s, q["v_t"]
 
-        # pass 1: 모든 e_j -> W_e
-        es, vs = [], []
+        # pass 1: 모든 e_j -> W_e  (클리핑용으로 m_j 도 같이 모은다)
+        es, ms, vs = [], [], []
         with torch.no_grad():
             for q in qs:
                 p_s, p_t = pair(student_v(q), q)
-                _, e, _, _, va = split_mag_dir(p_s, p_t, P)
-                es.append(e); vs.append(va)
+                m, e, _, _, va = split_mag_dir(p_s, p_t, P)
+                es.append(e); ms.append(m); vs.append(va)
         W_e = dea_weights(torch.stack(es), torch.stack(vs), eps_w)       # (N,B,H)
+
+        # ── anchor loss 클리핑 (--anchor_clip c, 0 = 끔) ─────────────────────
+        #   로그에 찍히는 anc = λ·mean_j L_j 가 c 를 넘으면 배율 s = c/anc 로 줄여
+        #   **실효 anchor loss 가 c 를 넘지 않게** 한다 (s = min(1, c/anc)).
+        #   스테이지 초반(새 태스크를 배우는 구간)에 anc 가 크게 튀어 FM 을 눌러
+        #   FWT 를 깎는 것을 막는다. 추정은 pass 1 의 no_grad 값으로 하므로 추가
+        #   forward 가 없고, s 는 상수(그래디언트 안 흐름)다.
+        clip_s = 1.0
+        if clip > 0:
+            with torch.no_grad():
+                pre = 0.0
+                for i in range(N):
+                    pre += float((W_e[i] * ms[i]).mean()
+                                 + torch.where(vs[i], beta * W_e[i] * es[i],
+                                               torch.zeros_like(es[i])).mean())
+                anc_pre = lam_lvl * pre / N
+            if anc_pre > clip:
+                clip_s = clip / anc_pre
 
         # pass 2: 같은 W_e 로 크기·방향
         lvl = []
@@ -227,12 +250,14 @@ def _lotus_anchor_loss(opt):
             L_m = (W_e[i] * m).mean()                                      # ★ V13
             L_e = torch.where(valid, beta * W_e[i] * e, torch.zeros_like(e)).mean()
             L_j = L_m + L_e
-            (LC.LAMBDA_ANCHOR * lam_lvl * L_j).backward()
+            (LC.LAMBDA_ANCHOR * lam_lvl * clip_s * L_j).backward()
             lvl.append(L_j.detach())
             if diag is not None:
                 diag.setdefault("w_mean", []).append(float(W_e[i].mean()))
                 diag.setdefault("w_max", []).append(float(W_e[i].max()))
-        return (lam_lvl * (sum(lvl) / N)).detach()
+        if diag is not None and clip > 0:
+            diag.setdefault("clip_s", []).append(clip_s)
+        return (lam_lvl * clip_s * (sum(lvl) / N)).detach()
 
     return LC, anchor_loss
 
@@ -251,7 +276,8 @@ def run_lotus(opt) -> None:
 
     argparse.ArgumentParser.parse_args = _patched
     print(f"[V13] LOTUS — dea W_e 를 크기+방향에 공유  β={opt.beta}  ε_w={opt.eps_w}  "
-          f"space={opt.dir_space}  λ_lvl={opt.lambda_level}  lifelong_K={opt.lifelong_k}",
+          f"space={opt.dir_space}  λ_lvl={opt.lambda_level}  lifelong_K={opt.lifelong_k}  "
+          f"anchor_clip={opt.anchor_clip if opt.anchor_clip > 0 else '끔'}",
           flush=True)
     try:
         LC.main()
@@ -299,6 +325,11 @@ def selftest() -> int:
     err = ((v_s[..., :6] - v_t[..., :6]).pow(2).sum(-1) - (m + 2 * r_s * r_t * e)).abs().max().item()
     ok = err < 1e-9; bad += not ok
     print(f"  ⑤ 분해 항등식: 최대오차 {err:.2e}  {'OK' if ok else '✗'}")
+    # ⑥ 클리핑 배율: anc > c 면 s·anc == c, anc ≤ c 면 s == 1
+    for anc, c, want in ((0.012, 0.005, 0.005), (0.002, 0.005, 0.002)):
+        sc = (c / anc) if anc > c else 1.0
+        ok = abs(sc * anc - want) < 1e-12 and sc <= 1.0; bad += not ok
+        print(f"  ⑥ anchor_clip: anc={anc} c={c} → s={sc:.3f}, 실효 {sc*anc:.4f}  {'OK' if ok else '✗'}")
     print(); print("전부 통과" if bad == 0 else f"✗ {bad} 항목 불일치")
     return 1 if bad else 0
 
@@ -312,6 +343,10 @@ def main() -> None:
     p.add_argument("--pose_dims", type=int, default=0)
     p.add_argument("--lambda_level", type=float, default=3.0,
                    help="앵커 손실 앞 계수. dea 드라이버 기본과 같은 3.0")
+    p.add_argument("--anchor_clip", type=float, default=0.0,
+                   help="anchor loss 상한 (λ 포함한 anc 값 기준). anc 가 이 값을 넘으면 "
+                        "s=c/anc 로 축소해 실효 anchor loss 를 c 에 고정한다. 0 = 끔. "
+                        "스테이지 초반 anc 가 튀어 FWT 를 깎는 것을 막는 용도 (lotus 전용)")
     p.add_argument("--codebook_k", type=int, default=None, help="clare 기본 100 / lotus 0")
     p.add_argument("--lifelong_k", type=int, default=None, help="lotus 전용, 기본 25")
     p.add_argument("--selftest", action="store_true")

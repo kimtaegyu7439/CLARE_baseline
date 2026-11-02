@@ -9,6 +9,11 @@
 #
 #   SUITE=object   기본. goal 도 된다
 #   BETAS="1.0 1.5 2.0" LAMS="1.5 2.0" SEEDS="7 42 1000"   조합 (기본 3×2×3 = 18 런)
+#   CLIPS="0.005 0.0025"   anchor loss 상한(--anchor_clip) 격자. 비우면(기본) 클리핑 없음.
+#     ★ 클리핑 런 예 (λ0.7 β2 × clip 2개 × 3 시드 = 6 런):
+#       CLIPS="0.005 0.0025" BETAS=2.0 LAMS=0.7 WAIT=0 nohup bash bash/Lotus_V13_h200_queue.sh > logs/h200_v13clip_queue.out 2>&1 &
+#     결과 폴더 태그에 _clip<c> 가 붙고 (lotus_v13_b2.0_lam0.7_clip0.005_k25_scopeLL_object_seed7),
+#     FAMILY=v13 리포트의 c 열에 clip 값이 들어간다.
 #     ★ 기본 격자는 다른 서버와 겹치지 않게 골랐다. object 는 서버1(λ=3, β=1,2) 과
 #       4090_2/서버1 GPU (λ 0.7~1.2, β 1~2) 가 이미 돌고 있어, 그 사이 λ∈{1.5, 2} 를 메운다.
 #       다른 조합이 필요하면 BETAS/LAMS 를 넘기면 된다. 리포트는 폴더명을 파싱하므로 격자에 무관하다.
@@ -40,6 +45,7 @@ SUITE=${SUITE:-object}
 BETAS=${BETAS:-"1.0 1.5 2.0"}
 LAMS=${LAMS:-"1.5 2.0"}
 SEEDS=${SEEDS:-"7 42 1000"}
+CLIPS=${CLIPS:-""}          # 비어 있으면 클리핑 없는 런 하나 ("" 한 칸)
 MAXJOBS=${MAXJOBS:-4}
 GPU=${GPU:-0}
 WAIT=${WAIT:-1}
@@ -60,8 +66,9 @@ SPLIT="${HF_LEROBOT_HOME}/LOTUS_setting/LIBERO-$(echo "${SUITE}" | tr a-z A-Z)/s
 mkdir -p logs results
 QLOG="logs/h200_v13_queue_${SUITE}.log"
 
-tag_of() {  # β λ seed
-    echo "lotus_v13_b$1_lam$2_k${LIFELONG_K}_scope${SCOPE_TAG}_${SUITE}_seed$3"
+tag_of() {  # β λ seed [clip]
+    local c=${4:-}
+    echo "lotus_v13_b$1_lam$2${c:+_clip${c}}_k${LIFELONG_K}_scope${SCOPE_TAG}_${SUITE}_seed$3"
 }
 train_done() {
     [ -f "results/$1/metrics_train.json" ] && return 0
@@ -72,22 +79,26 @@ gpu_mem() { nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits -i 
 
 PLAN=()
 for SEED in ${SEEDS}; do for LAM in ${LAMS}; do for BETA in ${BETAS}; do
-    PLAN+=("${BETA}:${LAM}:${SEED}")
+    if [ -n "${CLIPS}" ]; then
+        for CLIP in ${CLIPS}; do PLAN+=("${BETA}:${LAM}:${SEED}:${CLIP}"); done
+    else
+        PLAN+=("${BETA}:${LAM}:${SEED}:")
+    fi
 done; done; done
 
 if [ -n "${DRY:-}" ]; then
-    echo "H200 V13 큐  ${SUITE}  β∈{${BETAS}} λ∈{${LAMS}} seed∈{${SEEDS}}  → ${#PLAN[@]} 런, ${MAXJOBS} 병렬, GPU${GPU}, 런당 NW=${NW} OMP=${OMP_THREADS}"
+    echo "H200 V13 큐  ${SUITE}  β∈{${BETAS}} λ∈{${LAMS}} seed∈{${SEEDS}} clip∈{${CLIPS:-없음}}  → ${#PLAN[@]} 런, ${MAXJOBS} 병렬, GPU${GPU}, 런당 NW=${NW} OMP=${OMP_THREADS}"
     echo "python: ${PY}";  echo "GPU 메모리 지금: $(gpu_mem) MiB (유휴 기준 < ${MEM_IDLE})"
     for p in "${PLAN[@]}"; do
-        IFS=: read -r B L S <<< "${p}"; t=$(tag_of "${B}" "${L}" "${S}")
+        IFS=: read -r B L S C <<< "${p}"; t=$(tag_of "${B}" "${L}" "${S}" "${C}")
         st=$(train_done "${t}" && echo 학습완료 || (already_running "${t}" && echo 진행중 || echo 대기))
-        printf '  β=%-4s λ=%-4s seed %-5s %-56s %s\n' "${B}" "${L}" "${S}" "${t}" "${st}"
+        printf '  β=%-4s λ=%-4s clip=%-6s seed %-5s %-64s %s\n' "${B}" "${L}" "${C:--}" "${S}" "${t}" "${st}"
     done
     exit 0
 fi
 
 {
-echo "[$(date '+%F %T')] ════ H200 V13 큐 시작  ${SUITE} β∈{${BETAS}} λ∈{${LAMS}} seed∈{${SEEDS}}  ${#PLAN[@]} 런 / ${MAXJOBS} 병렬 ════"
+echo "[$(date '+%F %T')] ════ H200 V13 큐 시작  ${SUITE} β∈{${BETAS}} λ∈{${LAMS}} seed∈{${SEEDS}} clip∈{${CLIPS:-없음}}  ${#PLAN[@]} 런 / ${MAXJOBS} 병렬 ════"
 echo "  python ${PY}   NW=${NW} OMP=${OMP_THREADS}"
 
 if [ -n "${WAIT_PID:-}" ]; then
@@ -112,8 +123,9 @@ fi
 #   (4090_2 동기화 루프와 같은 리포트). 루프 프로세스가 FAMILY 를 물려받는다.
 FAMILY=v13 REPORT=LOTUS_MAR_sweep_report.py INTERVAL=300 bash bash/report_loop.sh start 2>&1 | head -1
 
-run_one() {   # β λ seed
-    local TAG; TAG=$(tag_of "$1" "$2" "$3")
+run_one() {   # β λ seed [clip]
+    local C=${4:-}
+    local TAG; TAG=$(tag_of "$1" "$2" "$3" "${C}")
     mkdir -p "results/${TAG}"
     echo "[$(date '+%F %T')] ▶ ${TAG}"
     CUDA_VISIBLE_DEVICES="${GPU}" MUJOCO_EGL_DEVICE_ID="${GPU}" MUJOCO_GL=egl \
@@ -122,6 +134,7 @@ run_one() {   # β λ seed
     "${PY}" -u "${ENTRY}" --setting lotus \
         --beta "$1" --eps_w "${EPS_W}" --dir_space "${SPACE}" \
         --lambda_level "$2" --lifelong_k "${LIFELONG_K}" \
+        ${C:+--anchor_clip "${C}"} \
         --anchor_scope "${SCOPE}" \
         --suite "${SUITE}" --steps "${STEPS}" --sampler_mode hard_linear \
         --skip_base_eval --seed "$3" --eval_seed "${EVAL_SEED}" \
@@ -132,11 +145,11 @@ run_one() {   # β λ seed
     echo "[$(date '+%F %T')] ◀ ${TAG} exit=${rc}"
 }
 for p in "${PLAN[@]}"; do
-    IFS=: read -r B L S <<< "${p}"; t=$(tag_of "${B}" "${L}" "${S}")
+    IFS=: read -r B L S C <<< "${p}"; t=$(tag_of "${B}" "${L}" "${S}" "${C}")
     if train_done "${t}"; then echo "[$(date '+%F %T')] ⏭ ${t} 이미 완료"; continue; fi
     if already_running "${t}"; then echo "[$(date '+%F %T')] ⏭ ${t} 이미 돌고 있다"; continue; fi
     while [ "$(jobs -rp | wc -l)" -ge "${MAXJOBS}" ]; do wait -n; done
-    run_one "${B}" "${L}" "${S}" &
+    run_one "${B}" "${L}" "${S}" "${C}" &
     sleep 30      # 코드북/환경 생성이 겹치지 않게
 done
 wait
