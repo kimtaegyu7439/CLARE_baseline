@@ -266,6 +266,7 @@ def _lotus_anchor_loss(opt):
         n = x_t.shape[0]
         tcol = t[:, None, None]
         c = float(opt.anchor_c)
+        clip = float(getattr(opt, "anchor_clip", 0.0) or 0.0)
         P = opt.pose_dims if opt.pose_dims else LC.POSE_DIMS
         inv_N = (1.0 / N) if opt.anchor_reduce == "mean" else 1.0
         sampler = getattr(args, "sampler_mode", "hard_linear") if args else "hard_linear"
@@ -302,8 +303,22 @@ def _lotus_anchor_loss(opt):
             coef = speedinv_coef(r_t, c) * inv_N * float(opt.beta)       # β: 방향 항 배율
             L_j = inv_N * m.mean() + torch.where(
                 valid, coef * e, torch.zeros_like(e)).mean()
-            (LC.LAMBDA_ANCHOR * lam_lvl * wmult * L_j).backward()
-            lvl.append(L_j.detach())
+            # ── anchor loss 클리핑 (--anchor_clip, 0 = 끔) ──────────────────
+            #   V5 는 1-pass 라 태스크 j 의 L_j 를 구한 즉시 backward 한다. 그래서
+            #   V13 처럼 "전 태스크 평균" 이 아니라 **태스크마다** λ·wmult·L_j 가
+            #   clip 을 넘으면 s_j = clip/(λ·wmult·L_j) 로 줄인다 (s_j 는 상수).
+            #   stage2(N=1) 에서는 V13 과 완전히 같고, N>1 이면 한 태스크의 튐이
+            #   다른 태스크의 앵커까지 끌어내리지 않는 per-task 판이다.
+            #   로그의 anc = λ·wmult·mean_j(s_j·L_j) ≤ clip 이 보장된다.
+            s_j = 1.0
+            if clip > 0:
+                a_j = lam_lvl * wmult * float(L_j.detach())
+                if a_j > clip:
+                    s_j = clip / a_j
+            (LC.LAMBDA_ANCHOR * lam_lvl * wmult * s_j * L_j).backward()
+            lvl.append(s_j * L_j.detach())
+            if diag is not None and clip > 0:
+                diag.setdefault("clip_s", []).append(s_j)
             if diag is not None:
                 # LC 의 로그가 w_mean/w_max 쌍을 함께 읽고 함께 비운다.
                 # ★ 계수에 warmup 배율을 곱해 찍는다 — 로그의 anc_w 가 실제로 걸린
@@ -334,7 +349,8 @@ def run_lotus(opt) -> None:
     #   설정 자체는 드라이버가 config.json 에 덤프하므로 기록은 그쪽이 정본이다.
     print(f"[V5] LOTUS — 방향계수 β/(r_T²+c)  c={opt.anchor_c}  β={opt.beta}  "
           f"space={opt.dir_space}  reduce={opt.anchor_reduce}  "
-          f"λ_lvl={opt.lambda_level}  lifelong_K={opt.lifelong_k}  warmup={opt.anchor_warmup}",
+          f"λ_lvl={opt.lambda_level}  lifelong_K={opt.lifelong_k}  warmup={opt.anchor_warmup}  "
+          f"anchor_clip={opt.anchor_clip if opt.anchor_clip > 0 else '끔'}",
           flush=True)
     try:
         LC.main()
@@ -412,6 +428,11 @@ def selftest() -> int:
     bad += not ok
     print(f"  ⑦ β=0.5 → 방향 계수 평균 {0.5*base:.4f} = 0.5 × {base:.4f}  {'OK' if ok else '✗'}")
     print()
+    # ⑦ anchor_clip: a_j > clip 이면 s_j·a_j == clip, 아니면 s_j == 1
+    for a_j, cl, want in ((0.02, 0.006, 0.006), (0.004, 0.006, 0.004)):
+        sj = (cl / a_j) if a_j > cl else 1.0
+        ok = abs(sj * a_j - want) < 1e-12 and sj <= 1.0; bad += not ok
+        print(f"  ⑦ anchor_clip: λL_j={a_j} clip={cl} → s={sj:.3f}, 실효 {sj*a_j:.4f}  {'OK' if ok else '✗'}")
     print("전부 통과" if bad == 0 else f"✗ {bad} 항목 불일치")
     return 1 if bad else 0
 
@@ -444,6 +465,11 @@ def main() -> None:
                         "동안 0→1 로 선형 상승 (예 0.25 = 처음 25%%). 0 = 끔. "
                         "FWT 는 스테이지 끝에서 재므로, 초반에 새 태스크를 앵커 없이 "
                         "배우게 두고 뒤에서 드리프트만 막는다")
+    p.add_argument("--anchor_clip", type=float, default=0.0,
+                   help="anchor loss 상한 (λ·warmup 까지 곱한 태스크별 값 기준). 태스크 j 의 "
+                        "λ·L_j 가 이 값을 넘으면 s_j=clip/(λ·L_j) 로 축소해 실효 값을 clip 에 "
+                        "고정한다 (그래디언트는 0 이 아니라 s_j 배). 0 = 끔. lotus 전용. "
+                        "폴더 태그 _clip<c>")
     # ── 앵커 세기 / 코드북 ─────────────────────────────────────────────────
     p.add_argument("--lambda_level", type=float, default=1.0,
                    help="앵커 손실 앞에 곱하는 계수. 최종 손실 L = L_FM + λ_lvl·L_anchor "

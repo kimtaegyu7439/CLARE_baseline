@@ -31,9 +31,10 @@ RES = REPO / "results"
 OUT = RES / "LOTUS_MAR_sweep.txt"
 PAT_V5 = re.compile(r"^lotus_v5(?P<space>act|vel)_c(?P<c>[0-9.]+)"
                     r"(?:_lam(?P<lam>[0-9.]+))?(?:_b(?P<beta>[0-9.]+))?(?:_warm(?P<warm>[0-9.]+))?"
+                    r"(?:_clip(?P<clip>[0-9.]+))?"
                     r"_k(?P<k>\d+)_scope(?P<scope>LL|ALL)_(?P<suite>goal|object|50)_seed(?P<seed>\d+)$")
 # V13: lotus_v13_b<β>_lam<λ>[_clip<c>]_k<K>_scope<LL|ALL>_<suite>_seed<N>
-#      (warm 없음. c 열에는 anchor_clip 상한을 넣는다 — 없으면 '-')
+#      (c, warm 없음. clip 열 = anchor_clip 상한, 없으면 '-')
 PAT_V13 = re.compile(r"^lotus_v13_b(?P<beta>[0-9.]+)_lam(?P<lam>[0-9.]+)(?:_clip(?P<clip>[0-9.]+))?"
                      r"_k(?P<k>\d+)_scope(?P<scope>LL|ALL)_(?P<suite>goal|object|50)_seed(?P<seed>\d+)$")
 # FAMILY=v13 이면 V13 폴더를 모아 results/LOTUS_V13_sweep.txt 에 쓴다 (report_loop 와 같이 env 로 고른다)
@@ -58,12 +59,13 @@ def discover():
             continue
         g = m.groupdict()
         if FAMILY == "v13":
-            runs.append(dict(dir=d, suite=g["suite"], seed=int(g["seed"]),
-                             c=float(g["clip"]) if g.get("clip") else None,
+            runs.append(dict(dir=d, suite=g["suite"], seed=int(g["seed"]), c=None,
+                             clip=float(g["clip"]) if g.get("clip") else None,
                              lam=float(g["lam"]), beta=float(g["beta"]), warm=None,
                              k=int(g["k"]), scope=g["scope"], space="act"))
             continue
         runs.append(dict(dir=d, suite=g["suite"], seed=int(g["seed"]), c=float(g["c"]),
+                         clip=float(g["clip"]) if g.get("clip") else None,
                          lam=float(g["lam"] or 1.0), beta=float(g["beta"] or 1.0),
                          warm=float(g["warm"] or 0.0), k=int(g["k"]), scope=g["scope"],
                          space=g["space"]))
@@ -190,11 +192,12 @@ def main() -> None:
         add("V13 앵커  L_j = w^e_j·m + β·w^e_j·e    (dea 의 W_e 를 크기 항에도, 1/N 없음, Σ_j w_j = 1)")
         add("  λ  앵커 손실 앞 계수 (L = L_FM + λ·L_anchor)     β  방향 항 배율")
         add("  태스크당 실효 계수 ≈ 크기 λ/N, 방향 λβ/N  (W_e ≈ 1/N 일 때)")
-        add("  c  = anchor_clip 상한 (anc=λ·mean_j L_j 가 c 를 넘으면 c 로 축소, '-' 면 없음)")
+        add("  clip = anchor_clip 상한 (anc=λ·mean_j L_j 가 넘으면 s=clip/anc 로 축소, '-' 면 없음)")
     else:
         add("V5 앵커   L_j = (1/N)[ m + β·e/(r_T²+c) ]")
         add("  λ  앵커 손실 앞 계수 (L = L_FM + λ·L_anchor)     β  방향 항 배율 (1 = 기존)")
         add("  c  방향 계수 분모 상수 (상한 1/c)                 warm  스테이지 내 앵커 warmup 비율")
+        add("  clip = anchor_clip 상한 (태스크별 λ·L_j 가 넘으면 s_j=clip/(λL_j) 로 축소, '-' 면 없음)")
     add("")
     add("지표  FWT↑ 배운 직후 / NBT↓ 이후 잃은 양(+면 망각) / AUC↑ 전 구간 평균 / AvgSR↑ 마지막 행")
     add("      t9 = 마지막 lifelong 태스크의 FWT (최종값과 같다 — object 의 병목 지표)")
@@ -208,27 +211,27 @@ def main() -> None:
         add("-" * W)
         add(f"libero_{suite}")
         add("-" * W)
-        add(f"  {'λ':>5}{'β':>5}{'c':>6}{'warm':>5}{'seed':>6}{'AvgSR':>8}{'FWT↑':>8}{'NBT↓':>8}"
+        add(f"  {'λ':>5}{'β':>5}{'c':>6}{'warm':>5}{'clip':>7}{'seed':>6}{'AvgSR':>8}{'FWT↑':>8}{'NBT↓':>8}"
             f"{'AUC↑':>8}{'t9':>6}{'칸':>7}   상태")
         groups: dict = {}
-        for r in sorted(rs, key=lambda r: (r["lam"], r["beta"], r["c"] or 0, r["warm"] or 0, r["seed"])):
+        for r in sorted(rs, key=lambda r: (r["lam"], r["beta"], r["c"] or 0, r["warm"] or 0, r["clip"] or 0, r["seed"])):
             R, la, src = read_R(r["dir"])
             m = lifelong(R, la)
-            key = (r["lam"], r["beta"], r["c"], r["warm"])
+            key = (r["lam"], r["beta"], r["c"], r["warm"], r["clip"])
             if m is None:
-                add(f"  {r['lam']:>5g}{r['beta']:>5g}{gf(r['c'], 6)}{gf(r['warm'], 5)}{r['seed']:>6}"
+                add(f"  {r['lam']:>5g}{r['beta']:>5g}{gf(r['c'], 6)}{gf(r['warm'], 5)}{gf(r['clip'], 7)}{r['seed']:>6}"
                     + f"{'-':>8}" * 4 + f"{'-':>6}{'-':>7}   {progress(r['dir'])}")
                 continue
             groups.setdefault(key, []).append((r["seed"], m))
             star = "" if m["done"] else "*"
-            add("  {:>5g}{:>5g}{}{}{:>6}{:>8}{:>8}{:>8}{:>8}{:>6}{:>7}   {}".format(
-                r["lam"], r["beta"], gf(r["c"], 6), gf(r["warm"], 5), r["seed"], fmt(m["AvgSR"]) + star,
+            add("  {:>5g}{:>5g}{}{}{}{:>6}{:>8}{:>8}{:>8}{:>8}{:>6}{:>7}   {}".format(
+                r["lam"], r["beta"], gf(r["c"], 6), gf(r["warm"], 5), gf(r["clip"], 7), r["seed"], fmt(m["AvgSR"]) + star,
                 fmt(m["FWT"]), fmt(m["NBT"], True), fmt(m["AUC"]), fmt(m["t9"]),
                 "{}/{}".format(m["have"], m["need"]),
                 "완주" if m["done"] else progress(r["dir"])))
         add("")
         add(f"  집계 (완주한 시드만, ± ddof=1)")
-        add(f"    {'λ':>5}{'β':>5}{'c':>6}{'warm':>5}{'n':>3}{'AvgSR':>14}{'FWT↑':>14}{'NBT↓':>14}{'AUC↑':>14}{'t9':>12}")
+        add(f"    {'λ':>5}{'β':>5}{'c':>6}{'warm':>5}{'clip':>7}{'n':>3}{'AvgSR':>14}{'FWT↑':>14}{'NBT↓':>14}{'AUC↑':>14}{'t9':>12}")
         for key in sorted(groups, key=lambda kk: tuple(x or 0 for x in kk)):
             g = [(s, m) for s, m in groups[key] if m["done"]]
             if not g:
@@ -241,16 +244,16 @@ def main() -> None:
                 mu = st.mean(vals); sg = "+" if kk == "NBT" and mu >= 0 else ""
                 txt = f"{sg}{mu:.1f} ± {st.stdev(vals):.1f}" if len(vals) > 1 else f"{sg}{mu:.1f}"
                 cols.append(txt.rjust(14 if kk != "t9" else 12))
-            add(f"    {key[0]:>5g}{key[1]:>5g}{gf(key[2], 6)}{gf(key[3], 5)}{len(g):>3}" + "".join(cols))
+            add(f"    {key[0]:>5g}{key[1]:>5g}{gf(key[2], 6)}{gf(key[3], 5)}{gf(key[4], 7)}{len(g):>3}" + "".join(cols))
         add("")
 
     add("=" * W)
     add("SR 행렬")
     add("=" * W)
-    for r in sorted(runs, key=lambda r: (r["suite"], r["lam"], r["beta"], r["c"] or 0, r["warm"] or 0, r["seed"])):
+    for r in sorted(runs, key=lambda r: (r["suite"], r["lam"], r["beta"], r["c"] or 0, r["warm"] or 0, r["clip"] or 0, r["seed"])):
         R, la, src = read_R(r["dir"])
         add("-" * W)
-        head = f"{r['suite']} λ={r['lam']:g} β={r['beta']:g} c={gf(r['c'], 0)} warm={gf(r['warm'], 0)} seed{r['seed']}   ({r['dir'].name})"
+        head = f"{r['suite']} λ={r['lam']:g} β={r['beta']:g} c={gf(r['c'], 0)} warm={gf(r['warm'], 0)} clip={gf(r['clip'], 0)} seed{r['seed']}   ({r['dir'].name})"
         if not R:
             add(head + "   — SR 없음"); add("-" * W); add(""); continue
         m = lifelong(R, la)
