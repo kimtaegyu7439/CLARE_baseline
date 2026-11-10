@@ -10,14 +10,21 @@
 팔 (--tsm_mode) — 질의 조건 (s̃, õ) 를 **어떻게 만드느냐**만 바꾼다
 ════════════════════════════════════════════════════════════════════════════
     팔           셀 나누기          s̃                    õ                       앵커
+    indep_gauss  없음 (셀 1개)      N(μ_s, σ_s)           N(m, σ_o)                sqerr
+                                    (태스크 전체 대각 가우시안 — s̃, õ 서로 독립)
     time_bin     에피소드 진행률    N(μ_s,k, σ_s,k)       N(m_k, σ_o,k)            sqerr
                  K 구간 (K=lifelong_k)                     (대각 가우시안, A 없음)
     state_mean   state k-means K    N(μ_s,k, σ_s,k)       m_k  (셀 o 평균만)      sqerr
+    state_gauss  state k-means K    N(μ_s,k, σ_s,k)       N(m_k, σ_o,k)            sqerr
+                                    (셀 안 o 의 원시 표준편차 — 선형 잔차 아님, A 없음)
     state_map    state k-means K    N(μ_s,k, σ_s,k)       m_k + A_k(z̃ − z̄_k)      sqerr   ← TETHER 의 TSM
     tether       = state_map                                                      MAR (L2_V5)
 
+  · indep_gauss → time_bin: "묶는 것" 자체가 보태는 것 (셀 없이 (s,o) 를 독립 가우시안으로 뽑으면)
   · time_bin → state_mean : "시간이 아니라 **상태**로 묶는 것"이 보태는 것
-  · state_mean → state_map: 셀 안에서 õ 가 s̃ 를 따라가는 **국소 선형 매핑 A_k** 가 보태는 것
+  · state_mean → state_gauss: 셀 o 평균 대신 셀 안 분산만큼 **독립 잡음**을 더하면 (A 없이) 어떻게 되나
+  · state_gauss → state_map: 셀 안에서 õ 가 s̃ 를 따라가는 **국소 선형 매핑 A_k** 가 보태는 것
+    (state_mean → state_map 도 같은 비교 — state_gauss 는 "잡음 vs 매핑" 을 가르는 중간 팔)
   · state_map → tether    : 방향 항 계수를 2·r_s·r_T (MSE) 에서 1/(r_T²+c) (MAR) 로 — 앵커만 바뀜
 
 ★ 네 팔이 공유하는 것
@@ -41,8 +48,9 @@ from pathlib import Path
 
 import torch
 
-MODES = ("time_bin", "state_mean", "state_map", "tether")
-SQERR_MODES = ("time_bin", "state_mean", "state_map")
+MODES = ("indep_gauss", "time_bin", "state_mean", "state_gauss", "state_map", "tether")
+SQERR_MODES = ("indep_gauss", "time_bin", "state_mean", "state_gauss", "state_map")
+GAUSS_O_MODES = ("indep_gauss", "time_bin", "state_gauss")   # õ 에 σ_o 잡음을 더하는 팔
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -122,6 +130,36 @@ def install_patches(mode: str) -> None:
             return sample_hard_gauss(cb, n, gen)
         return orig_hard(cb, n, gen)
     LC.sample_codebook_hard = sample_hard_tsm
+
+    if mode == "indep_gauss":
+        # 셀 없음: 진행률을 전부 0 으로 주면 time_bin 빌더가 구간 하나(K_eff=1)를 만든다 →
+        # s̃~N(μ_s,σ_s), õ~N(m,σ_o) 가 태스크 전체 대각 가우시안이 되고 서로 독립이다.
+        def build_indep(s, o, K, seed, h_scale=1.0, **kw):
+            cb = build_codebook_timebin(s, o, K, torch.zeros(s.shape[0], device=s.device), h_scale=h_scale)
+            cb["tsm_mode"] = "indep_gauss"
+            return cb
+        LC.build_codebook = build_indep
+        return
+
+    if mode == "state_gauss":
+        # state k-means 셀은 그대로, õ 는 m_k 에 셀 안 o 의 **원시** 표준편차 잡음을 더한다 (A 없음).
+        # 드라이버의 sig_o 는 A 를 뺀 선형 잔차 표준편차라 더 얇다 — 여기서는 원시 분산을 다시 센다.
+        # 셀 라벨은 표준화 s 의 최근접 중심으로 복원한다 (k-means 하드 배정과 같다; 병합된 셀의
+        # 점만 중심 기준으로 붙으므로 극소수 점이 다른 셀로 갈 수 있다).
+        def build_state_gauss(s, o, K, seed, **kw):
+            cb = orig_build(s, o, K, seed, **kw)
+            zs = ((s - cb["mean_s"].to(s.device)) / cb["std_s"].to(s.device))
+            lab = torch.cdist(zs, cb["c"].to(s.device)).argmin(1)
+            _, sig_raw = _per_cell(o, lab, cb["K_eff"])
+            cb["sig_o"] = sig_raw.clamp_min(1e-3 * float(o.std())).cpu()
+            cb["A"] = torch.zeros_like(cb["A"])
+            cb["A_fro"] = torch.zeros_like(cb["A_fro"])
+            cb["n_demoted"] = cb["K_eff"]
+            cb["gauss_o"] = True
+            cb["tsm_mode"] = "state_gauss"
+            return cb
+        LC.build_codebook = build_state_gauss
+        return
 
     if mode == "state_mean":
         def build_state_mean(s, o, K, seed, **kw):
@@ -209,10 +247,30 @@ def selftest() -> int:
     ok &= bool((oo.std(0).mean() > 0))                    # 잡음이 붙었다
     print(f"  ① time_bin: K_eff={cb['K_eff']} N={cb['N']} 샘플 shape {tuple(ss.shape)},{tuple(oo.shape)}  "
           f"{'OK' if ok else 'FAIL'}")
-    # state_mean/state_map 은 드라이버 함수를 쓴다 — 가능하면 같이 검증
+    # indep_gauss: 셀 하나, 전체 평균/표준편차
+    cbi = build_codebook_timebin(s, o, K, torch.zeros(N))
+    oki = cbi["K_eff"] == 1 and torch.allclose(cbi["mu_s"][0], s.mean(0), atol=1e-4) \
+        and torch.allclose(cbi["m"][0], o.mean(0), atol=1e-4)
+    si, oi = sample_hard_gauss(cbi, 64)
+    oki &= si.shape == (64, 16) and oi.shape == (64, 3072) and bool(oi.std(0).mean() > 0)
+    print(f"  ⓪ indep_gauss: K_eff={cbi['K_eff']} 전체 평균 일치, 샘플 shape OK  {'OK' if oki else 'FAIL'}")
+    ok &= bool(oki)
+    # state_mean/state_gauss/state_map 은 드라이버 함수를 쓴다 — 가능하면 같이 검증
     try:
         import Lotus_L3_V7dea as LC
         cb2 = LC.build_codebook(s, o, K, seed=0)
+        # state_gauss: 원시 셀 표준편차 ≥ 선형 잔차 표준편차, A=0, 샘플이 m_k 에서 벗어난다
+        zs2 = (s - cb2["mean_s"]) / cb2["std_s"]
+        lab2 = torch.cdist(zs2, cb2["c"]).argmin(1)
+        _, sig_raw = _per_cell(o, lab2, cb2["K_eff"])
+        cbg = dict(cb2); cbg["sig_o"] = sig_raw.clamp_min(1e-3 * float(o.std()))
+        cbg["A"] = torch.zeros_like(cb2["A"]); cbg["gauss_o"] = True
+        okg = bool((cbg["sig_o"].pow(2).sum(1) >= cb2["sig_o"].pow(2).sum(1) * 0.999).all())
+        sg, og = sample_hard_gauss(cbg, 8)
+        okg &= float(torch.cdist(og, cbg["m"]).min(1).values.mean()) > 0 and sg.shape == (8, 16)
+        print(f"  ④ state_gauss: 원시 σ_o ≥ 잔차 σ_o 모든 셀, 잡음 샘플 OK  {'OK' if okg else 'FAIL'}   "
+              f"(총분산 비 원시/잔차 mean={float((cbg['sig_o'].pow(2).sum(1) / cb2['sig_o'].pow(2).sum(1)).mean()):.2f})")
+        ok &= okg
         cb2m = dict(cb2); cb2m["A"] = torch.zeros_like(cb2["A"])
         s1, o1 = LC.sample_codebook_hard(cb2m, 8)
         k_hit = torch.cdist(o1, cb2m["m"]).argmin(1)
@@ -254,7 +312,7 @@ def main() -> None:
            "beta": opt.beta if opt.tsm_mode == "tether" else None,
            "anchor_c": opt.anchor_c if opt.tsm_mode == "tether" else None,
            "cells_per_task": q2.lifelong_k,
-           "sampler": "hard_gauss" if opt.tsm_mode == "time_bin" else "hard_linear",
+           "sampler": "hard_gauss" if opt.tsm_mode in GAUSS_O_MODES else "hard_linear",
            "local_map_A": opt.tsm_mode in ("state_map", "tether")}
     if q2.out:
         Path(q2.out).mkdir(parents=True, exist_ok=True)

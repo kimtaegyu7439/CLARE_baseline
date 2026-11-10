@@ -11,6 +11,9 @@
 #   cat results/LOTUS_TSM_ablation.txt                        # 5 분마다 갱신되는 집계
 #
 #   SUITE=object  SEEDS="7 42 1000"  ARMS="time_bin state_mean state_map tether"
+#   추가 팔 (2026-11-10): ARMS="indep_gauss state_gauss"  — 셀 없는 독립 가우시안 / state 셀 + 가우시안 õ(A 없음)
+#   노이즈 시드 재평가는 bash/Lotus_eval_seeds_h200_queue.sh RUNS="lotus_tsm_state_map_object_seed7 ..." 로;
+#   리포트가 <run>/eval_seeds/seed*.json 을 읽어 같은 txt 에 절을 추가한다.
 #   LAM=0.7  (네 팔 공통 λ)   BETA=0.6  C=0.1  (tether 의 MAR 계수 — object 최적, LOTUS_MAR_sweep)
 #   MAXJOBS=4 (런당 VRAM ~5G, 병목은 CPU — 롤아웃·데이터로더)   GPU=0
 #   WAIT=1    지금 GPU 가 비기를 기다린 뒤 시작 (기본 0 = 바로 시작)
